@@ -1,0 +1,26 @@
+{
+  "port": 5401,
+  "workspacesRoot": "F:/Projects/videoforge/workspaces",
+  "theme": "midnight-press",
+  "agent": {
+    "command": "claude",
+    "args": ["-p", "--dangerously-skip-permissions", "--output-format", "text"],
+    "timeoutMs": 5400000,
+    "maxConcurrent": 1
+  },
+  "skills": {
+    "webVideoPresentation": "C:/Users/木木/.claude/skills/web-video-presentation",
+    "videoAvatarSubtitles": "C:/Users/木木/.claude/skills/video-avatar-subtitles"
+  },
+  "tts": {
+    "provider": "minimax-http",
+    "apiKeyEnv": "MINIMAX_API_KEY",
+    "voiceId": "GongheJiucun02",
+    "speed": 1.0
+  },
+  "devServerBasePort": 5300,
+  "discovery": {
+    "intervalMinutes": 120,
+    "autoStart": true
+  }
+}

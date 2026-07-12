@@ -1,0 +1,15 @@
+{
+  "name": "videoforge",
+  "private": true,
+  "version": "0.1.0",
+  "workspaces": [
+    "server",
+    "dashboard"
+  ],
+  "scripts": {
+    "server": "node --watch server/src/index.js",
+    "dashboard": "npm run dev --workspace dashboard",
+    "build": "npm run build --workspace dashboard",
+    "start": "node server/src/index.js"
+  }
+}
