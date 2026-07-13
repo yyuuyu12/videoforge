@@ -76,6 +76,35 @@ function phaseIndex(job: JobDetail) {
   return 6;
 }
 
+function WorkbenchLoading() {
+  return (
+    <main className="vf-opening-loader" role="status" aria-live="polite">
+      <div className="vf-opening-doodle" aria-hidden="true">
+        <svg viewBox="0 0 180 150">
+          <g className="vf-opening-sparkles">
+            <path d="M31 48h12M37 42v12" />
+            <path d="M139 34h9M143.5 29.5v9" />
+            <path d="M145 105h10" />
+          </g>
+          <g className="vf-opening-character">
+            <path className="vf-opening-clap" d="M47 61 131 47l4 20-84 14z" />
+            <path className="vf-opening-clap-lines" d="m61 59 10 17m15-21 10 17m15-21 10 17" />
+            <rect x="51" y="72" width="84" height="60" rx="10" />
+            <path d="M52 88h82" />
+            <circle cx="77" cy="104" r="2.5" />
+            <circle cx="109" cy="104" r="2.5" />
+            <path d="M81 116q12 9 24 0" />
+            <path d="M62 133q-5 7-1 11m63-11q5 7 1 11" />
+          </g>
+        </svg>
+      </div>
+      <strong>正在打开作品</strong>
+      <span>正在恢复上次制作进度</span>
+      <div className="vf-opening-dots" aria-hidden="true"><i /><i /><i /></div>
+    </main>
+  );
+}
+
 export function Workbench({
   jobId,
   onBack,
@@ -133,8 +162,7 @@ export function Workbench({
     lastCurrent.current = next;
   }, [job?.stage, job?.status, selected]);
   const meta = useMemo(() => (job ? parseMeta(job) : {}), [job]);
-  if (!job || selected === null)
-    return <main className="vf-page">正在打开作品…</main>;
+  if (!job || selected === null) return <WorkbenchLoading />;
   const current = phaseIndex(job);
   const styleEditable = job.stage === "gate_style" && job.status === "waiting_approval";
   const canView = (index: number) => index <= current || job.status === "done";
