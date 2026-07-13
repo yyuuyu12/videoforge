@@ -20,8 +20,23 @@ export const api = Router();
 api.get("/health", (_req, res) => res.json({ ok: true }));
 api.get("/meta", (_req, res) => res.json({ stages: STAGES, theme: config.theme }));
 
+function usageCategory(service, operation = "") {
+  if (service === "minimax") return "audio";
+  if (service === "heygem") return "avatar";
+  if (["tikhub", "asr"].includes(service)) return "source";
+  if (service !== "llm") return "other";
+  if (/chapter_gen|visual-refine/.test(operation)) return "visual";
+  if (/script_outline|text-refine|completion/.test(operation)) return "text";
+  if (/audio_synth|audio-refine/.test(operation)) return "audio";
+  if (/avatar_gen|avatar-refine/.test(operation)) return "avatar";
+  if (/subtitle_cues/.test(operation)) return "visual";
+  return "other";
+}
+
 api.get("/usage", (req, res) => {
   const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+  const pageSize = Math.max(5, Math.min(50, Number(req.query.pageSize) || 12));
+  const requestedPage = Math.max(1, Number(req.query.page) || 1);
   const since = `-${days - 1} days`;
   const services = db.prepare(`
     SELECT service,
@@ -49,13 +64,44 @@ api.get("/usage", (req, res) => {
     GROUP BY date(created_at)
     ORDER BY day ASC
   `).all(since);
+  const totalRecent = Number(db.prepare(`
+    SELECT COUNT(*) AS count FROM usage_events WHERE created_at >= datetime('now', ?)
+  `).get(since).count || 0);
+  const totalPages = Math.max(1, Math.ceil(totalRecent / pageSize));
+  const page = Math.min(requestedPage, totalPages);
   const recent = db.prepare(`
     SELECT id, service, operation, job_id, status, requests, input_tokens, output_tokens,
       units, unit, duration_ms, estimated, detail, created_at
     FROM usage_events
     WHERE created_at >= datetime('now', ?)
-    ORDER BY id DESC LIMIT 40
+    ORDER BY id DESC LIMIT ? OFFSET ?
+  `).all(since, pageSize, (page - 1) * pageSize).map((row) => ({
+    ...row,
+    category: usageCategory(row.service, row.operation),
+  }));
+  const categoryRows = db.prepare(`
+    SELECT service, operation,
+      SUM(requests) AS requests,
+      SUM(input_tokens) AS input_tokens,
+      SUM(output_tokens) AS output_tokens,
+      SUM(units) AS units,
+      MAX(unit) AS unit
+    FROM usage_events
+    WHERE created_at >= datetime('now', ?)
+    GROUP BY service, operation
   `).all(since);
+  const categoryMap = new Map();
+  for (const row of categoryRows) {
+    const category = usageCategory(row.service, row.operation);
+    const current = categoryMap.get(category) || { category, requests: 0, input_tokens: 0, output_tokens: 0, characters: 0, audio_seconds: 0, audio_mb: 0 };
+    current.requests += Number(row.requests || 0);
+    current.input_tokens += Number(row.input_tokens || 0);
+    current.output_tokens += Number(row.output_tokens || 0);
+    if (row.unit === "characters") current.characters += Number(row.units || 0);
+    if (row.unit === "audio_seconds") current.audio_seconds += Number(row.units || 0);
+    if (row.unit === "audio_mb") current.audio_mb += Number(row.units || 0);
+    categoryMap.set(category, current);
+  }
   const totals = services.reduce((sum, row) => ({
     requests: sum.requests + Number(row.requests || 0),
     succeeded: sum.succeeded + Number(row.succeeded || 0),
@@ -68,8 +114,10 @@ api.get("/usage", (req, res) => {
     days,
     totals: { ...totals, minimaxEstimatedCny: Number((totals.minimaxCharacters / 1000 * 0.35).toFixed(2)) },
     services,
+    categories: [...categoryMap.values()],
     daily,
     recent,
+    pagination: { page, pageSize, total: totalRecent, totalPages },
   });
 });
 

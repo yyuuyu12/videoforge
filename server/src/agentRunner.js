@@ -60,9 +60,9 @@ export function ensureWorkspaceTrusted(cwd) {
  *
  * Returns { ok, output } — output is combined stdout tail for logging.
  */
-export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {} }) {
+export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation }) {
   if (loadSettings().llm.mode === "api") {
-    return runApiAgent({ jobId, stage, cwd, prompt, onProgress });
+    return runApiAgent({ jobId, stage, cwd, prompt, onProgress, usageOperation });
   }
   return new Promise((resolve) => {
     const task = () => {
@@ -112,7 +112,7 @@ export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {} }) {
         onProgress(ok ? 88 : 100, ok ? "模型修改完成，正在刷新结果" : "模型执行失败，正在整理错误信息");
         recordUsage({
           service: "llm",
-          operation: `agent:${stage}`,
+          operation: usageOperation || `agent:${stage}`,
           jobId,
           status: ok ? "success" : "failed",
           inputTokens: Math.ceil(String(prompt).length / 2),
@@ -147,7 +147,7 @@ const API_TOOLS = [
   { type: "function", function: { name: "run_command", description: "在工作区中运行必要的项目命令，例如 npm install、tsc 或构建检查", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } } },
 ];
 
-async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {} }) {
+async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation }) {
   const { llm } = loadSettings();
   logEvent(jobId, stage, `API agent start (${llm.provider}/${llm.model})`);
   try {
@@ -166,7 +166,7 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {} })
       const data = await response.json();
       recordUsage({
         service: "llm",
-        operation: `agent:${stage}`,
+        operation: usageOperation || `agent:${stage}`,
         jobId,
         status: response.ok ? "success" : "failed",
         inputTokens: data.usage?.prompt_tokens ?? Math.ceil(JSON.stringify(messages).length / 2),

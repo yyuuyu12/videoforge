@@ -169,6 +169,15 @@ export interface UsageData {
     avg_duration_ms: number | null;
     has_estimates: number;
   }>;
+  categories: Array<{
+    category: "text" | "visual" | "audio" | "avatar" | "source" | "other";
+    requests: number;
+    input_tokens: number;
+    output_tokens: number;
+    characters: number;
+    audio_seconds: number;
+    audio_mb: number;
+  }>;
   daily: Array<{ day: string; requests: number; tokens: number; minimax_characters: number }>;
   recent: Array<{
     id: number;
@@ -185,7 +194,9 @@ export interface UsageData {
     estimated: number;
     detail: string | null;
     created_at: string;
+    category: "text" | "visual" | "audio" | "avatar" | "source" | "other";
   }>;
+  pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -202,7 +213,8 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   meta: () => req<{ stages: StageDef[]; theme: string }>("/meta"),
-  usage: (days = 30) => req<UsageData>(`/usage?days=${days}`),
+  usage: (days = 30, page = 1, pageSize = 12) =>
+    req<UsageData>(`/usage?days=${days}&page=${page}&pageSize=${pageSize}`),
   sources: () => req<Source[]>("/sources"),
   addSource: (name: string, url: string) =>
     req("/sources", { method: "POST", body: JSON.stringify({ name, url }) }),

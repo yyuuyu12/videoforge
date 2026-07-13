@@ -344,7 +344,16 @@ export async function runFeedback(job, { chapter, message, phase, onProgress = (
     `检查结果：列出实际执行的检查与结果；未执行的检查要如实说明。`,
   ].join("\n");
   onProgress(16, "已限定修改范围，正在启动模型");
-  return runAgent({ jobId: job.id, stage: "debug", cwd: job.workspace, prompt, onProgress });
+  const usageOperation = ["文案确认", "口播稿审阅"].includes(phase)
+    ? "text-refine"
+    : phase === "配音字幕"
+      ? "audio-refine"
+      : ["选择风格", "逐页生成"].includes(phase)
+        ? "visual-refine"
+        : phase === "数字人"
+          ? "avatar-refine"
+          : "refine";
+  return runAgent({ jobId: job.id, stage: "debug", cwd: job.workspace, prompt, onProgress, usageOperation });
 }
 
 export function readArticleTitle(workspace) {
