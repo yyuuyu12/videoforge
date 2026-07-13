@@ -2,6 +2,7 @@ import { mkdirSync, writeFileSync, readFileSync, rmSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { loadSettings, minimaxKey } from "./settings.js";
+import { recordUsage } from "./db.js";
 
 /**
  * MiniMax REST client — contracts verified in clone-voice.sh and
@@ -37,29 +38,37 @@ async function post(url, key, body, headers = {}) {
 /** Synthesize one line; returns mp3 as a Buffer. Used by 试听 + key test. */
 export async function synthesize(text, overrides = {}) {
   const { key, base, mm } = ctx();
-  const data = await post(
-    `${base}/v1/t2a_v2`,
-    key,
-    JSON.stringify({
-      model: mm.model,
-      text,
-      stream: false,
-      voice_setting: {
-        voice_id: overrides.voiceId ?? mm.voiceId,
-        speed: overrides.speed ?? mm.speed,
-        vol: 1.0,
-        pitch: 0,
-        ...(overrides.emotion ?? mm.emotion
-          ? { emotion: overrides.emotion ?? mm.emotion }
-          : {}),
-      },
-      audio_setting: { format: "mp3", sample_rate: 32000, bitrate: 128000, channel: 1 },
-    }),
-    { "content-type": "application/json" },
-  );
-  const hex = data?.data?.audio;
-  if (!hex) throw new Error("响应中没有音频数据");
-  return Buffer.from(hex, "hex");
+  const started = Date.now();
+  try {
+    const data = await post(
+      `${base}/v1/t2a_v2`,
+      key,
+      JSON.stringify({
+        model: mm.model,
+        text,
+        stream: false,
+        voice_setting: {
+          voice_id: overrides.voiceId ?? mm.voiceId,
+          speed: overrides.speed ?? mm.speed,
+          vol: 1.0,
+          pitch: 0,
+          ...(overrides.emotion ?? mm.emotion
+            ? { emotion: overrides.emotion ?? mm.emotion }
+            : {}),
+        },
+        audio_setting: { format: "mp3", sample_rate: 32000, bitrate: 128000, channel: 1 },
+      }),
+      { "content-type": "application/json" },
+    );
+    const hex = data?.data?.audio;
+    if (!hex) throw new Error("响应中没有音频数据");
+    const audio = Buffer.from(hex, "hex");
+    recordUsage({ service: "minimax", operation: "tts", units: String(text).length, unit: "characters", durationMs: Date.now() - started, detail: `${mm.model}/${overrides.voiceId ?? mm.voiceId}` });
+    return audio;
+  } catch (error) {
+    recordUsage({ service: "minimax", operation: "tts", status: "failed", units: String(text).length, unit: "characters", durationMs: Date.now() - started, detail: error.message });
+    throw error;
+  }
 }
 
 export async function testKey() {
@@ -79,6 +88,7 @@ export async function cloneVoice({ filename, dataBase64, voiceId }) {
     throw new Error("voice_id 需 8-256 位，字母开头，仅字母/数字/-/_，结尾非 -/_");
   }
   const { key, base } = ctx();
+  const started = Date.now();
 
   const ext = (filename?.split(".").pop() || "mp3").toLowerCase();
   const work = join(tmpdir(), `vf-clone-${Date.now()}`);
@@ -111,6 +121,7 @@ export async function cloneVoice({ filename, dataBase64, voiceId }) {
       speed: 1.0,
       emotion: null,
     });
+    recordUsage({ service: "minimax", operation: "voice-clone", durationMs: Date.now() - started, detail: voiceId });
     return { voiceId, demoBase64: demo.toString("base64") };
   } finally {
     rmSync(work, { recursive: true, force: true });

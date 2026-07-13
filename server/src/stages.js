@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
-import { logEvent } from "./db.js";
+import { logEvent, recordUsage } from "./db.js";
 import { runAgent } from "./agentRunner.js";
 import { health as heygemHealth, submitJob, taskStatus, downloadResult } from "./heygem.js";
 
@@ -165,6 +165,13 @@ const runners = {
     let r = await sh("npm", ["run", "extract-narrations"], presDir, job.id, "audio_synth");
     if (!r.ok) return r;
     r = await sh("node", ["scripts/synthesize-audio-node.mjs"], presDir, job.id, "audio_synth");
+    const usageMatch = r.output?.match(/VF_USAGE\s+(\{[^\n]+\})/);
+    if (usageMatch) {
+      try {
+        const usage = JSON.parse(usageMatch[1]);
+        if (usage.requests > 0) recordUsage({ service: "minimax", operation: "pipeline-tts", jobId: job.id, requests: usage.requests, units: usage.characters, unit: "characters", status: r.ok ? "success" : "failed", detail: "audio_synth" });
+      } catch {}
+    }
     return r;
   },
 
@@ -309,7 +316,8 @@ export async function runStage(job) {
 }
 
 /** Feedback -> scoped debug agent run against one chapter (or global). */
-export async function runFeedback(job, { chapter, message, phase }) {
+export async function runFeedback(job, { chapter, message, phase, onProgress = () => {} }) {
+  onProgress(10, "正在理解你的修改要求");
   const skill = config.skills.webVideoPresentation;
   const scopeLine = phase === "文案确认"
     ? `当前查看“文案确认”：只允许修改 article.md，不得修改其他文件。`
@@ -330,7 +338,8 @@ export async function runFeedback(job, { chapter, message, phase }) {
     `修改时遵守 ${skill}/references/CHAPTER-CRAFT.md 的规范（主题 token / 字号 ≥20px / 反AI味）。`,
     `完成后 npx tsc --noEmit 必须 0 错误。不要向用户提问，做完即退出。`,
   ].join("\n");
-  return runAgent({ jobId: job.id, stage: "debug", cwd: job.workspace, prompt });
+  onProgress(16, "已限定修改范围，正在启动模型");
+  return runAgent({ jobId: job.id, stage: "debug", cwd: job.workspace, prompt, onProgress });
 }
 
 export function readArticleTitle(workspace) {

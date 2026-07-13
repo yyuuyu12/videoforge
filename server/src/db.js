@@ -56,6 +56,23 @@ CREATE TABLE IF NOT EXISTS feedback (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS usage_events (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  service TEXT NOT NULL,
+  operation TEXT NOT NULL,
+  job_id INTEGER,
+  status TEXT NOT NULL DEFAULT 'success',
+  requests INTEGER NOT NULL DEFAULT 1,
+  input_tokens INTEGER NOT NULL DEFAULT 0,
+  output_tokens INTEGER NOT NULL DEFAULT 0,
+  units REAL NOT NULL DEFAULT 0,
+  unit TEXT,
+  duration_ms INTEGER NOT NULL DEFAULT 0,
+  estimated INTEGER NOT NULL DEFAULT 0,
+  detail TEXT,
+  created_at TEXT DEFAULT (datetime('now'))
+);
+
 CREATE TABLE IF NOT EXISTS douyin_extractions (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   input_url TEXT NOT NULL,
@@ -82,6 +99,11 @@ CREATE TABLE IF NOT EXISTS douyin_extractions (
 const extractionColumns = db.prepare("PRAGMA table_info(douyin_extractions)").all().map((column) => column.name);
 if (!extractionColumns.includes("job_id")) db.exec("ALTER TABLE douyin_extractions ADD COLUMN job_id INTEGER");
 
+const feedbackColumns = db.prepare("PRAGMA table_info(feedback)").all().map((column) => column.name);
+if (!feedbackColumns.includes("progress")) db.exec("ALTER TABLE feedback ADD COLUMN progress INTEGER NOT NULL DEFAULT 0");
+if (!feedbackColumns.includes("progress_message")) db.exec("ALTER TABLE feedback ADD COLUMN progress_message TEXT");
+if (!feedbackColumns.includes("error")) db.exec("ALTER TABLE feedback ADD COLUMN error TEXT");
+
 // ---- tiny helpers ---------------------------------------------------------
 
 export function logEvent(jobId, stage, message, level = "info") {
@@ -104,4 +126,38 @@ export function updateJob(jobId, fields) {
 
 export function getJob(jobId) {
   return db.prepare("SELECT * FROM jobs WHERE id = ?").get(jobId);
+}
+
+export function recordUsage({
+  service,
+  operation,
+  jobId = null,
+  status = "success",
+  requests = 1,
+  inputTokens = 0,
+  outputTokens = 0,
+  units = 0,
+  unit = null,
+  durationMs = 0,
+  estimated = false,
+  detail = null,
+}) {
+  db.prepare(`
+    INSERT INTO usage_events
+      (service, operation, job_id, status, requests, input_tokens, output_tokens, units, unit, duration_ms, estimated, detail)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+  `).run(
+    service,
+    operation,
+    jobId,
+    status,
+    Math.max(0, Number(requests) || 0),
+    Math.max(0, Math.round(Number(inputTokens) || 0)),
+    Math.max(0, Math.round(Number(outputTokens) || 0)),
+    Math.max(0, Number(units) || 0),
+    unit,
+    Math.max(0, Math.round(Number(durationMs) || 0)),
+    estimated ? 1 : 0,
+    detail ? String(detail).slice(0, 500) : null,
+  );
 }

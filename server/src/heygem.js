@@ -1,4 +1,5 @@
 import { loadSettings } from "./settings.js";
+import { recordUsage } from "./db.js";
 
 /**
  * HeyGem lip-sync gateway client — PRODUCT-PLAN §三.9.
@@ -39,17 +40,24 @@ export async function health() {
 
 export async function submitJob({ audioB64, videoB64, avatarKey, audioFmt = "mp3", videoFmt = "mp4" }) {
   const { base, headers } = ctx();
+  const started = Date.now();
   const payload = { audio_b64: audioB64, audio_fmt: audioFmt, enhancer: false };
   if (avatarKey) payload.avatar_key = avatarKey;
   else payload.video_b64 = videoB64, (payload.video_fmt = videoFmt);
-  const resp = await fetch(`${base}/video/generate`, {
-    method: "POST",
-    headers: { ...headers, "content-type": "application/json" },
-    body: JSON.stringify(payload),
-  });
-  const data = await resp.json();
-  if (!resp.ok || !data.task_id) throw new Error(data?.detail ?? `HTTP ${resp.status}`);
-  return { taskId: data.task_id };
+  try {
+    const resp = await fetch(`${base}/video/generate`, {
+      method: "POST",
+      headers: { ...headers, "content-type": "application/json" },
+      body: JSON.stringify(payload),
+    });
+    const data = await resp.json();
+    if (!resp.ok || !data.task_id) throw new Error(data?.detail ?? `HTTP ${resp.status}`);
+    recordUsage({ service: "heygem", operation: "lip-sync", units: Math.round(Buffer.from(audioB64, "base64").length / 1024 / 1024 * 100) / 100, unit: "audio_mb", durationMs: Date.now() - started });
+    return { taskId: data.task_id };
+  } catch (error) {
+    recordUsage({ service: "heygem", operation: "lip-sync", status: "failed", durationMs: Date.now() - started, detail: error.message });
+    throw error;
+  }
 }
 
 export async function taskStatus(taskId) {

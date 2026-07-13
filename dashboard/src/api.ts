@@ -48,6 +48,9 @@ export interface Feedback {
   chapter: string | null;
   message: string;
   status: string;
+  progress: number;
+  progress_message: string | null;
+  error: string | null;
   created_at: string;
 }
 
@@ -142,6 +145,48 @@ export interface DouyinExtraction {
   steps: Array<{ id: string; ok: boolean; warning?: boolean; message: string }>;
 }
 
+export interface UsageData {
+  days: number;
+  totals: {
+    requests: number;
+    succeeded: number;
+    failed: number;
+    inputTokens: number;
+    outputTokens: number;
+    minimaxCharacters: number;
+    minimaxEstimatedCny: number;
+  };
+  services: Array<{
+    service: string;
+    requests: number;
+    succeeded: number;
+    failed: number;
+    input_tokens: number;
+    output_tokens: number;
+    units: number;
+    unit: string | null;
+    avg_duration_ms: number | null;
+    has_estimates: number;
+  }>;
+  daily: Array<{ day: string; requests: number; tokens: number; minimax_characters: number }>;
+  recent: Array<{
+    id: number;
+    service: string;
+    operation: string;
+    job_id: number | null;
+    status: string;
+    requests: number;
+    input_tokens: number;
+    output_tokens: number;
+    units: number;
+    unit: string | null;
+    duration_ms: number;
+    estimated: number;
+    detail: string | null;
+    created_at: string;
+  }>;
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
   const resp = await fetch(`/api${path}`, {
     headers: { "content-type": "application/json" },
@@ -156,6 +201,7 @@ async function req<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   meta: () => req<{ stages: StageDef[]; theme: string }>("/meta"),
+  usage: (days = 30) => req<UsageData>(`/usage?days=${days}`),
   sources: () => req<Source[]>("/sources"),
   addSource: (name: string, url: string) =>
     req("/sources", { method: "POST", body: JSON.stringify({ name, url }) }),

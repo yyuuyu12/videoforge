@@ -20,6 +20,59 @@ export const api = Router();
 api.get("/health", (_req, res) => res.json({ ok: true }));
 api.get("/meta", (_req, res) => res.json({ stages: STAGES, theme: config.theme }));
 
+api.get("/usage", (req, res) => {
+  const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+  const since = `-${days - 1} days`;
+  const services = db.prepare(`
+    SELECT service,
+      SUM(requests) AS requests,
+      SUM(CASE WHEN status = 'success' THEN requests ELSE 0 END) AS succeeded,
+      SUM(CASE WHEN status = 'failed' THEN requests ELSE 0 END) AS failed,
+      SUM(input_tokens) AS input_tokens,
+      SUM(output_tokens) AS output_tokens,
+      SUM(units) AS units,
+      MAX(unit) AS unit,
+      ROUND(AVG(NULLIF(duration_ms, 0))) AS avg_duration_ms,
+      MAX(estimated) AS has_estimates
+    FROM usage_events
+    WHERE created_at >= datetime('now', ?)
+    GROUP BY service
+    ORDER BY requests DESC
+  `).all(since);
+  const daily = db.prepare(`
+    SELECT date(created_at) AS day,
+      SUM(requests) AS requests,
+      SUM(input_tokens + output_tokens) AS tokens,
+      SUM(CASE WHEN service = 'minimax' AND unit = 'characters' THEN units ELSE 0 END) AS minimax_characters
+    FROM usage_events
+    WHERE created_at >= datetime('now', ?)
+    GROUP BY date(created_at)
+    ORDER BY day ASC
+  `).all(since);
+  const recent = db.prepare(`
+    SELECT id, service, operation, job_id, status, requests, input_tokens, output_tokens,
+      units, unit, duration_ms, estimated, detail, created_at
+    FROM usage_events
+    WHERE created_at >= datetime('now', ?)
+    ORDER BY id DESC LIMIT 40
+  `).all(since);
+  const totals = services.reduce((sum, row) => ({
+    requests: sum.requests + Number(row.requests || 0),
+    succeeded: sum.succeeded + Number(row.succeeded || 0),
+    failed: sum.failed + Number(row.failed || 0),
+    inputTokens: sum.inputTokens + Number(row.input_tokens || 0),
+    outputTokens: sum.outputTokens + Number(row.output_tokens || 0),
+    minimaxCharacters: sum.minimaxCharacters + (row.service === "minimax" && row.unit === "characters" ? Number(row.units || 0) : 0),
+  }), { requests: 0, succeeded: 0, failed: 0, inputTokens: 0, outputTokens: 0, minimaxCharacters: 0 });
+  res.json({
+    days,
+    totals: { ...totals, minimaxEstimatedCny: Number((totals.minimaxCharacters / 1000 * 0.35).toFixed(2)) },
+    services,
+    daily,
+    recent,
+  });
+});
+
 // ---- settings（密钥只存本地 settings.local.json，GET 永远打码）---------------
 
 api.get("/settings", (_req, res) => res.json(publicSettings()));
@@ -494,12 +547,26 @@ api.post("/jobs/:id/feedback", async (req, res) => {
   if (!message) return res.status(400).json({ error: "message required" });
 
   const f = db
-    .prepare("INSERT INTO feedback (job_id, chapter, message, status) VALUES (?, ?, ?, 'running')")
-    .run(job.id, chapter ?? null, message);
+    .prepare("INSERT INTO feedback (job_id, chapter, message, status, progress, progress_message) VALUES (?, ?, ?, 'running', 5, ?)")
+    .run(job.id, chapter ?? null, message, "修改请求已提交，等待模型开始");
   res.json({ feedbackId: f.lastInsertRowid }); // respond immediately; agent runs async
 
-  const r = await runFeedback(job, { chapter, message, phase });
-  db.prepare("UPDATE feedback SET status = ? WHERE id = ?").run(r.ok ? "done" : "failed", f.lastInsertRowid);
+  try {
+    const r = await runFeedback(job, {
+      chapter,
+      message,
+      phase,
+      onProgress: (progress, progressMessage) => db.prepare(
+        "UPDATE feedback SET progress = ?, progress_message = ? WHERE id = ?",
+      ).run(Math.max(0, Math.min(100, Math.round(progress))), progressMessage, f.lastInsertRowid),
+    });
+    const error = r.ok ? null : (r.note || r.output || "模型没有完成修改");
+    db.prepare("UPDATE feedback SET status = ?, progress = 100, progress_message = ?, error = ? WHERE id = ?")
+      .run(r.ok ? "done" : "failed", r.ok ? "修改完成，结果已刷新" : "修改未完成", error ? String(error).slice(0, 800) : null, f.lastInsertRowid);
+  } catch (error) {
+    db.prepare("UPDATE feedback SET status = 'failed', progress = 100, progress_message = '修改未完成', error = ? WHERE id = ?")
+      .run(String(error.message || error).slice(0, 800), f.lastInsertRowid);
+  }
 });
 
 /** 读工作区里的产出文件（白名单制），给审批/预览环节展示内容用。 */

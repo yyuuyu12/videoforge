@@ -694,12 +694,13 @@ export function Workbench({
               job.feedback.map((item) => (
                 <p key={item.id} className="vf-chat-message">
                   {item.message}
-                  <small>
+                  {item.status === "running" && <span className="vf-feedback-progress" aria-label={`修改进度 ${item.progress || 0}%`}><i style={{ width: `${item.progress || 0}%` }} /></span>}
+                  <small className={item.status === "failed" ? "error" : ""}>
                     {item.status === "done"
-                      ? "修改完成"
+                      ? "已经按你的要求改好了"
                       : item.status === "failed"
-                        ? "修改失败"
-                        : "正在修改…"}
+                        ? `修改失败：${item.error || "模型执行时遇到问题，请重试"}`
+                        : `${item.progress_message || "正在理解你的修改要求"} · ${item.progress || 0}%`}
                   </small>
                 </p>
               ))

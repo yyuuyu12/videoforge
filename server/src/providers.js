@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { config } from "./config.js";
 import { loadSettings } from "./settings.js";
+import { recordUsage } from "./db.js";
 
 /**
  * LLM provider adapter — PRODUCT-PLAN §二.
@@ -20,10 +21,28 @@ import { loadSettings } from "./settings.js";
 
 export async function complete({ prompt, system, maxTokens = 1024 }) {
   const { llm } = loadSettings();
-  if (llm.mode === "subscription") return completeViaClaude(prompt, system);
-  if (llm.provider === "anthropic")
-    return completeViaAnthropic(llm, prompt, system, maxTokens);
-  return completeViaOpenAI(llm, prompt, system, maxTokens);
+  const started = Date.now();
+  const inputEstimate = Math.ceil(`${system || ""}\n${prompt || ""}`.length / 2);
+  try {
+    const result = llm.mode === "subscription"
+      ? { text: await completeViaClaude(prompt, system), usage: null }
+      : llm.provider === "anthropic"
+        ? await completeViaAnthropic(llm, prompt, system, maxTokens)
+        : await completeViaOpenAI(llm, prompt, system, maxTokens);
+    recordUsage({
+      service: "llm",
+      operation: "completion",
+      inputTokens: result.usage?.inputTokens ?? inputEstimate,
+      outputTokens: result.usage?.outputTokens ?? Math.ceil(String(result.text).length / 2),
+      durationMs: Date.now() - started,
+      estimated: !result.usage,
+      detail: `${llm.mode}/${llm.provider || "claude"}/${llm.model || "default"}`,
+    });
+    return result.text;
+  } catch (error) {
+    recordUsage({ service: "llm", operation: "completion", status: "failed", inputTokens: inputEstimate, durationMs: Date.now() - started, estimated: true, detail: error.message });
+    throw error;
+  }
 }
 
 /** Cheap end-to-end check of whatever the user configured. */
@@ -67,7 +86,10 @@ async function completeViaAnthropic(llm, prompt, system, maxTokens) {
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.error?.message ?? `HTTP ${resp.status}`);
-  return data.content?.map((b) => b.text ?? "").join("") ?? "";
+  return {
+    text: data.content?.map((b) => b.text ?? "").join("") ?? "",
+    usage: data.usage ? { inputTokens: data.usage.input_tokens, outputTokens: data.usage.output_tokens } : null,
+  };
 }
 
 // ---- openai-compatible ------------------------------------------------------
@@ -89,7 +111,10 @@ async function completeViaOpenAI(llm, prompt, system, maxTokens) {
   });
   const data = await resp.json();
   if (!resp.ok) throw new Error(data?.error?.message ?? `HTTP ${resp.status}`);
-  return data.choices?.[0]?.message?.content ?? "";
+  return {
+    text: data.choices?.[0]?.message?.content ?? "",
+    usage: data.usage ? { inputTokens: data.usage.prompt_tokens, outputTokens: data.usage.completion_tokens } : null,
+  };
 }
 
 // ---- subscription (local claude) --------------------------------------------

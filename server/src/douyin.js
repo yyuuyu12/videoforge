@@ -1,4 +1,5 @@
 import { loadSettings } from "./settings.js";
+import { recordUsage } from "./db.js";
 
 /**
  * 抖音链接 → 文案（作为选题/文章来源）。
@@ -53,6 +54,7 @@ export async function extractDouyin(input, { onProgress = () => {} } = {}) {
     `${TIKHUB}/api/v1/douyin/web/fetch_one_video?aweme_id=${awemeId}`,
   );
   let detailError = "";
+  const tikHubStarted = Date.now();
   for (const apiUrl of detailUrls) {
     try {
       const r = await fetch(apiUrl, { headers, signal: AbortSignal.timeout(15000) });
@@ -68,7 +70,11 @@ export async function extractDouyin(input, { onProgress = () => {} } = {}) {
       detailError = error.message;
     }
   }
-  if (!item) throw new Error(`TikHub 获取视频信息失败：${detailError || "检查链接、key 或额度"}`);
+  if (!item) {
+    recordUsage({ service: "tikhub", operation: "douyin-detail", status: "failed", durationMs: Date.now() - tikHubStarted, detail: detailError });
+    throw new Error(`TikHub 获取视频信息失败：${detailError || "检查链接、key 或额度"}`);
+  }
+  recordUsage({ service: "tikhub", operation: "douyin-detail", durationMs: Date.now() - tikHubStarted, detail: awemeId || "share-url" });
   awemeId = String(item.aweme_id || awemeId || "");
   steps.push({ id: "tikhub", ok: true, message: `TikHub 已返回视频信息${awemeId ? ` · ${awemeId}` : ""}` });
   await onProgress({ stage: "tikhub", progress: 18, message: "已获取原视频信息，正在检查字幕和原声", awemeId });
@@ -107,13 +113,17 @@ export async function extractDouyin(input, { onProgress = () => {} } = {}) {
     let asrError = "";
     if (media?.url && s.asr.baseUrl) {
       await onProgress({ stage: "asr", progress: 30, message: `已选择${media.source === "original-mp3" ? "完整原声 MP3" : "视频音轨"}，正在提交 Whisper` });
+      const asrStarted = Date.now();
       const result = await localAsrTranscribe(media.url, s.asr.baseUrl.replace(/\/$/, ""), onProgress);
       script = result.text;
       asrError = result.error;
+      recordUsage({ service: "asr", operation: "transcription", status: script ? "success" : "failed", units: durationSeconds, unit: "audio_seconds", durationMs: Date.now() - asrStarted, detail: script ? `${script.length} chars` : asrError });
       if (script) via = "local-whisper-asr";
     }
     if (media?.url && !script && s.llm.provider === "openai-compatible" && s.llm.apiKey) {
+      const asrStarted = Date.now();
       script = await openAiTranscribe(media.url, s);
+      recordUsage({ service: "asr", operation: "openai-transcription", status: script ? "success" : "failed", units: durationSeconds, unit: "audio_seconds", durationMs: Date.now() - asrStarted, detail: script ? `${script.length} chars` : "empty response" });
       if (script) via = "openai-compatible-stt";
     }
     steps.push({

@@ -30,7 +30,7 @@ const FORCE = process.argv.includes("--force");
 
 const segments = JSON.parse(readFileSync(join(root, "audio-segments.json"), "utf8"));
 
-let ok = 0, skipped = 0, failed = 0;
+let ok = 0, skipped = 0, failed = 0, synthesizedChars = 0;
 
 for (let i = 0; i < segments.length; i++) {
   const seg = segments[i];
@@ -93,6 +93,7 @@ for (let i = 0; i < segments.length; i++) {
     const secs = ((Date.now() - t0) / 1000).toFixed(1);
     console.log(`${label}  ✓ ${secs}s`);
     ok++;
+    synthesizedChars += String(seg.text || "").length;
   } catch (err) {
     console.error(`${label}  ✗ FAILED — ${err.message}`);
     failed++;
@@ -101,4 +102,5 @@ for (let i = 0; i < segments.length; i++) {
 
 console.log("");
 console.log(`done: ${ok} synthesized, ${skipped} skipped, ${failed} failed`);
+console.log(`VF_USAGE ${JSON.stringify({ requests: ok, characters: synthesizedChars })}`);
 if (failed > 0) process.exit(1);
