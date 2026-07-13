@@ -197,13 +197,12 @@ export function Workbench({
   const styleEditable = job.stage === "gate_style" && job.status === "waiting_approval";
   const canView = (index: number) => index <= current || job.status === "done";
   const previewUrl = job.devServer.url;
-  const avatarProgressEvent = job.events.find(
-    (event) =>
-      event.stage === "avatar_gen" && event.message.startsWith("progress|"),
+  const activeProgressEvent = job.events.find(
+    (event) => event.stage === job.stage && event.message.startsWith("progress|"),
   );
-  const avatarProgressParts = avatarProgressEvent?.message.split("|") ?? [];
-  const avatarPercent = Number(avatarProgressParts[1] ?? 0);
-  const avatarProgressText = avatarProgressParts[2] || stageProgress.avatar_gen;
+  const activeProgressParts = activeProgressEvent?.message.split("|") ?? [];
+  const activePercent = Number(activeProgressParts[1] ?? 0);
+  const activeProgressText = activeProgressParts[2] || stageProgress[job.stage] || "正在处理当前任务";
   const ensurePreview = async () => {
     if (!job.devServer.running) {
       setBusy(true);
@@ -636,10 +635,10 @@ export function Workbench({
             ["queued", "running"].includes(job.status) && (
               <div className="vf-avatar-progress">
                 <div>
-                  <b>{avatarProgressText}</b>
-                  <strong>总进度 {avatarPercent}%</strong>
+                  <b>{activeProgressText}</b>
+                  <strong>总进度 {activePercent}%</strong>
                 </div>
-                <progress max="100" value={avatarPercent} />
+                <progress max="100" value={activePercent} />
                 <span>完成后会自动生成按章节拆分的预览视频。</span>
               </div>
             )}
@@ -847,8 +846,8 @@ export function Workbench({
           <i />
           <div>
             <b>
-              {job.stage === "avatar_gen"
-                ? `${avatarProgressText} · ${avatarPercent}%`
+              {activeProgressEvent
+                ? `${activeProgressText} · ${activePercent}%`
                 : stageProgress[job.stage] || "正在处理当前任务"}
             </b>
             <span>

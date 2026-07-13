@@ -249,8 +249,8 @@ async function localAsrTranscribe(mp4Url, asrBaseUrl, onProgress = () => {}) {
         /* keep polling */
       }
     }
-  } catch {
-    /* fallthrough */
+  } catch (error) {
+    return { text: "", error: `ASR 服务连接失败：${error.message || error}` };
   }
   return { text: "", error: "ASR 等待超过 10 分钟" };
 }

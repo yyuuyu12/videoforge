@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { db, logEvent, recordUsage } from "./db.js";
@@ -41,12 +41,23 @@ function sh(cmd, args, cwd, jobId, stage) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, shell: true, env: process.env });
     let out = "";
+    let settled = false;
     const cap = (s) => (s.length > 20000 ? s.slice(-20000) : s);
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
     child.stdout.on("data", (d) => (out = cap(out + d)));
     child.stderr.on("data", (d) => (out = cap(out + d)));
+    child.on("error", (error) => {
+      const note = `Unable to start ${cmd}: ${error.message}`;
+      logEvent(jobId, stage, note, "error");
+      finish({ ok: false, output: out, note });
+    });
     child.on("close", (code) => {
       logEvent(jobId, stage, `$ ${cmd} ${args.join(" ")}\nexit ${code}\n${out.slice(-1500)}`, code === 0 ? "info" : "error");
-      resolve({ ok: code === 0, output: out });
+      finish({ ok: code === 0, output: out, note: code === 0 ? "" : `Command exited with code ${code}` });
     });
   });
 }
@@ -68,6 +79,19 @@ function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
 }
 
+// Node 24 on this Windows host can terminate without an exception inside
+// fs.cpSync(). Copying this tiny template tree ourselves keeps scaffold
+// failures observable and works on all supported Node versions.
+function copyTree(source, destination) {
+  mkdirSync(destination, { recursive: true });
+  for (const entry of readdirSync(source)) {
+    const from = join(source, entry);
+    const to = join(destination, entry);
+    if (statSync(from).isDirectory()) copyTree(from, to);
+    else copyFileSync(from, to);
+  }
+}
+
 function ensureNativeScaffold(skill, target, theme) {
   const templates = join(skill, "templates");
   const tokens = join(skill, "themes", theme, "tokens.css");
@@ -76,8 +100,8 @@ function ensureNativeScaffold(skill, target, theme) {
   const existing = existsSync(join(target, "package.json")) && existsSync(join(target, "src", "App.tsx"));
   mkdirSync(target, { recursive: true });
   if (!existing) {
-    cpSync(join(templates, "src"), join(target, "src"), { recursive: true, force: true });
-    cpSync(join(templates, "scripts"), join(target, "scripts"), { recursive: true, force: true });
+    copyTree(join(templates, "src"), join(target, "src"));
+    copyTree(join(templates, "scripts"), join(target, "scripts"));
     copyFileSync(join(templates, "index.html"), join(target, "index.html"));
     copyFileSync(join(templates, "vite.config.ts"), join(target, "vite.config.ts"));
     writeJson(join(target, "package.json"), {
@@ -205,6 +229,7 @@ const runners = {
       `任务：按 outline.md 把全部章节开发完成。规范（必须照做）：`,
       `- 每章开发前重读 ${skill}/references/CHAPTER-CRAFT.md（单一必读入口）`,
       `- 开始每章前必须更新 presentation/.videoforge-chapter-progress.json，格式为 {"current":当前序号,"total":总章节数,"chapter":"章节目录名","status":"generating","message":"正在生成本章画面"}`,
+      `- 每章代码与自检完成后，立刻把本章注册进 src/registry/chapters.ts 并运行 npx tsc --noEmit；注册成功后才能开始下一章，确保用户可以逐章预览，不得等全部章节生成后才统一注册`,
       `- 每章代码与自检完成后把同一文件的 status 改为 "checking"、message 改为 "本章完成，正在检查"，再开始下一章；全部完成后写 status "done"`,
       `- 每章独立文件夹 + 独立 CSS 前缀 + narrations.ts（长度 = step 数）`,
       `- 全部注册进 src/registry/chapters.ts，每次结构变化 bump useStepper.ts 的 STORAGE_KEY`,

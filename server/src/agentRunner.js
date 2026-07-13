@@ -16,6 +16,11 @@ const queue = [];
  * 并发写同一份文件（job-2 实测踩过：一个 stage 连开 3 个孤儿 agent）。
  */
 const liveChildren = new Set();
+
+function reportProgress(jobId, stage, onProgress, percent, message) {
+  onProgress(percent, message);
+  logEvent(jobId, stage, `progress|${Math.max(0, Math.min(100, Math.round(percent)))}|${message}`);
+}
 function reapAll() {
   for (const pid of liveChildren) killTree(pid);
   liveChildren.clear();
@@ -69,7 +74,7 @@ export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usa
       running++;
       const trusted = ensureWorkspaceTrusted(cwd);
       logEvent(jobId, stage, `agent start (cwd=${cwd}, trusted=${trusted})`);
-      onProgress(22, "模型已启动，正在分析修改范围");
+      reportProgress(jobId, stage, onProgress, 22, "模型已启动，正在分析任务");
 
       const child = spawn(config.agent.command, config.agent.args, {
         cwd,
@@ -98,7 +103,7 @@ export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usa
       let progressIndex = 0;
       const progressTimer = setInterval(() => {
         const step = progressSteps[Math.min(progressIndex, progressSteps.length - 1)];
-        onProgress(step[0], step[1]);
+        reportProgress(jobId, stage, onProgress, step[0], step[1]);
         progressIndex++;
       }, 6000);
 
@@ -109,7 +114,7 @@ export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usa
         running--;
         drain();
         const ok = code === 0;
-        onProgress(ok ? 88 : 100, ok ? "模型修改完成，正在刷新结果" : "模型执行失败，正在整理错误信息");
+        reportProgress(jobId, stage, onProgress, ok ? 88 : 100, ok ? "模型任务完成，正在整理结果" : "模型执行失败，正在整理错误信息");
         recordUsage({
           service: "llm",
           operation: usageOperation || `agent:${stage}`,
@@ -155,38 +160,57 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
       { role: "system", content: "你是 VideoForge 的代码与内容制作代理。只能操作当前工作区。必须实际调用工具完成任务并进行检查，不要只给建议。" },
       { role: "user", content: prompt },
     ];
-    onProgress(22, "模型已连接，正在分析修改范围");
+    reportProgress(jobId, stage, onProgress, 22, "模型已连接，正在分析任务");
     for (let turn = 0; turn < 40; turn++) {
       const started = Date.now();
-      const response = await fetch(`${llm.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-        method: "POST",
-        headers: { authorization: `Bearer ${llm.apiKey}`, "content-type": "application/json" },
-        body: JSON.stringify({ model: llm.model, messages, tools: API_TOOLS, tool_choice: "auto", max_tokens: 8192 }),
-      });
-      const data = await response.json();
+      let response;
+      let responseText = "";
+      for (let attempt = 0; attempt < 3; attempt++) {
+        response = await fetch(`${llm.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+          method: "POST",
+          headers: { authorization: `Bearer ${llm.apiKey}`, "content-type": "application/json" },
+          body: JSON.stringify({ model: llm.model, messages, tools: API_TOOLS, tool_choice: "auto", max_tokens: 8192 }),
+          signal: AbortSignal.timeout(180000),
+        });
+        responseText = await response.text();
+        if (response.status < 500 || attempt === 2) break;
+        const waitMs = 1500 * (attempt + 1);
+        reportProgress(jobId, stage, onProgress, Math.min(76, 28 + turn * 4), `上游暂时不可用，正在第 ${attempt + 2}/3 次重试`);
+        logEvent(jobId, stage, `upstream HTTP ${response.status}; retry ${attempt + 2}/3`, "error");
+        await new Promise((resolve) => setTimeout(resolve, waitMs));
+      }
+      let data;
+      let responseParseError = "";
+      try {
+        data = JSON.parse(responseText);
+      } catch {
+        data = {};
+        responseParseError = `上游返回非 JSON 响应（HTTP ${response.status}）：${responseText.replace(/\s+/g, " ").slice(0, 180)}`;
+      }
       recordUsage({
         service: "llm",
         operation: usageOperation || `agent:${stage}`,
         jobId,
-        status: response.ok ? "success" : "failed",
+        status: response.ok && !responseParseError ? "success" : "failed",
         inputTokens: data.usage?.prompt_tokens ?? Math.ceil(JSON.stringify(messages).length / 2),
         outputTokens: data.usage?.completion_tokens ?? 0,
         durationMs: Date.now() - started,
         estimated: !data.usage,
         detail: `${llm.provider}/${llm.model}`,
       });
+      if (responseParseError) throw new Error(responseParseError);
       if (!response.ok) throw new Error(data?.error?.message ?? `HTTP ${response.status}`);
       const message = data.choices?.[0]?.message;
       if (!message) throw new Error("模型没有返回消息");
       messages.push(message);
       const calls = message.tool_calls ?? [];
       if (!calls.length) {
-        onProgress(88, "模型修改完成，正在刷新结果");
+        reportProgress(jobId, stage, onProgress, 88, "模型任务完成，正在整理结果");
         logEvent(jobId, stage, `API agent done\n--- tail ---\n${String(message.content ?? "").slice(-1500)}`);
         return { ok: true, output: String(message.content ?? "") };
       }
       const toolNames = calls.map((call) => call.function.name).join("、");
-      onProgress(Math.min(78, 30 + turn * 4), `正在执行修改步骤：${toolNames}`);
+      reportProgress(jobId, stage, onProgress, Math.min(78, 30 + turn * 4), `正在执行：${toolNames}`);
       for (const call of calls) {
         let result;
         try {
