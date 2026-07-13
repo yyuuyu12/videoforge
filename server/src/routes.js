@@ -20,6 +20,88 @@ export const api = Router();
 api.get("/health", (_req, res) => res.json({ ok: true }));
 api.get("/meta", (_req, res) => res.json({ stages: STAGES, theme: config.theme }));
 
+function chapterGeneration(job) {
+  const root = join(job.workspace, "presentation", "src", "chapters");
+  let expected = 0;
+  try {
+    const outline = readFileSync(join(job.workspace, "outline.md"), "utf8");
+    expected = (outline.match(/^\|\s*\d{2}:\d{2}\s*-\s*\d{2}:\d{2}\s*\|/gm) || []).length;
+  } catch {}
+  const reviewRows = db.prepare("SELECT chapter_key, status FROM chapter_reviews WHERE job_id = ?").all(job.id);
+  const reviews = new Map(reviewRows.map((row) => [row.chapter_key, row.status]));
+  const chapters = existsSync(root)
+    ? readdirSync(root, { withFileTypes: true })
+      .filter((entry) => entry.isDirectory() && entry.name !== "01-example")
+      .sort((a, b) => a.name.localeCompare(b.name, "zh-CN", { numeric: true }))
+      .map((entry, index) => {
+        const dir = join(root, entry.name);
+        const files = readdirSync(dir);
+        const narrationFile = files.find((name) => name === "narrations.ts");
+        let title = entry.name.replace(/^\d+[-_]?/, "").replace(/[-_]+/g, " ");
+        let steps = 0;
+        if (narrationFile) {
+          const narration = readFileSync(join(dir, narrationFile), "utf8");
+          const lines = narration.match(/^\s*["'`](.+?)["'`],?\s*$/gm) || [];
+          steps = lines.length;
+          const first = lines[0]?.replace(/^\s*["'`]|["'`],?\s*$/g, "").trim();
+          if (first) title = first.length > 30 ? `${first.slice(0, 30)}…` : first;
+        }
+        const ready = Boolean(narrationFile && files.some((name) => name.endsWith(".tsx")) && files.some((name) => name.endsWith(".css")));
+        return {
+          key: entry.name,
+          index: index + 1,
+          title,
+          steps,
+          ready,
+          status: reviews.get(entry.name) || (ready ? "review" : "generating"),
+        };
+      })
+    : [];
+  const serviceEvent = db.prepare("SELECT message FROM job_events WHERE job_id = ? AND stage = 'chapter_gen' AND (message LIKE '%agent start%' OR message LIKE '%API agent start%') ORDER BY id DESC LIMIT 1").get(job.id);
+  const service = serviceEvent?.message?.match(/(?:API )?agent start(?: \((.+)\)|.*)/)?.[1]
+    || (serviceEvent ? "本机订阅模型" : "等待模型服务");
+  const ready = chapters.filter((chapter) => chapter.ready).length;
+  const approved = chapters.filter((chapter) => chapter.status === "approved").length;
+  const total = Math.max(expected, chapters.length);
+  let liveProgress = null;
+  try {
+    liveProgress = JSON.parse(readFileSync(join(job.workspace, "presentation", ".videoforge-chapter-progress.json"), "utf8"));
+  } catch {}
+  const liveCompleted = liveProgress
+    ? Math.max(0, Number(liveProgress.current || 1) - (liveProgress.status === "done" ? 0 : 1))
+    : ready;
+  const percent = job.stage === "chapter_gen" && liveProgress?.total
+    ? Math.min(100, Math.round((liveCompleted / Number(liveProgress.total)) * 100))
+    : (total ? Math.round((ready / total) * 100) : 0);
+  const liveMessage = liveProgress && job.stage === "chapter_gen"
+    ? `第 ${liveProgress.current}/${liveProgress.total} 章 · ${liveProgress.chapter || "画面"} · ${liveProgress.message || "正在生成"}`
+    : null;
+  if (job.stage === "chapter_gen") {
+    chapters.forEach((chapter) => {
+      if (!liveProgress) chapter.status = chapter.index === 1 ? "generating" : "queued";
+      else if (chapter.index < Number(liveProgress.current)) chapter.status = "review";
+      else if (chapter.index === Number(liveProgress.current) && liveProgress.status !== "done") chapter.status = "generating";
+      else if (liveProgress.status !== "done") chapter.status = "queued";
+    });
+  }
+  return {
+    service,
+    expected: total,
+    discovered: chapters.length,
+    ready,
+    completed: job.stage === "chapter_gen" ? liveCompleted : ready,
+    approved,
+    percent,
+    current: liveProgress,
+    message: liveMessage || (job.stage === "chapter_gen"
+      ? `正在生成并校验章节，已完成 ${ready}/${total || "?"}`
+      : job.stage === "gate_chapters"
+        ? `画面已生成，等待逐章确认 ${approved}/${chapters.length}`
+        : "章节内容已保留"),
+    chapters,
+  };
+}
+
 function usageCategory(service, operation = "") {
   if (service === "minimax") return "audio";
   if (service === "heygem") return "avatar";
@@ -487,7 +569,7 @@ api.get("/jobs/:id", (req, res) => {
   const feedback = db
     .prepare("SELECT * FROM feedback WHERE job_id = ? ORDER BY id DESC LIMIT 50")
     .all(job.id);
-  res.json({ ...job, events, feedback, devServer: devServerStatus(job.id) });
+  res.json({ ...job, events, feedback, chapterGeneration: chapterGeneration(job), devServer: devServerStatus(job.id) });
 });
 
 api.put("/jobs/:id/options", (req, res) => {
@@ -583,7 +665,34 @@ api.get("/jobs/:id/avatar/previews/:name", (req, res) => {
 });
 
 api.post("/jobs/:id/approve", (req, res) => {
-  res.json({ ok: approveGate(Number(req.params.id)) });
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  if (job.stage === "gate_chapters") {
+    const generation = chapterGeneration(job);
+    const pending = generation.chapters.filter((chapter) => chapter.status !== "approved");
+    if (!generation.chapters.length || pending.length) {
+      return res.status(409).json({ error: `请先逐章确认画面，还有 ${pending.length || generation.expected || 1} 章未确认` });
+    }
+  }
+  res.json({ ok: approveGate(job.id) });
+});
+
+api.post("/jobs/:id/chapters/:chapter/approve", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  if (job.stage !== "gate_chapters" || job.status !== "waiting_approval") {
+    return res.status(409).json({ error: "画面尚未进入章节验收，暂时不能确认" });
+  }
+  const chapter = basename(req.params.chapter);
+  const generation = chapterGeneration(job);
+  const item = generation.chapters.find((candidate) => candidate.key === chapter);
+  if (!item?.ready) return res.status(409).json({ error: "本章尚未生成完成，暂时不能确认" });
+  db.prepare(`
+    INSERT INTO chapter_reviews (job_id, chapter_key, status) VALUES (?, ?, 'approved')
+    ON CONFLICT(job_id, chapter_key) DO UPDATE SET status = 'approved', updated_at = datetime('now')
+  `).run(job.id, chapter);
+  logEvent(job.id, "gate_chapters", `章节确认通过 ${item.index}/${generation.chapters.length}: ${chapter}`);
+  res.json({ ok: true, chapter, chapterGeneration: chapterGeneration(job) });
 });
 
 api.post("/jobs/:id/retry", (req, res) => {
@@ -600,10 +709,22 @@ api.post("/jobs/:id/feedback", async (req, res) => {
   if (!feedbackPhases.includes(phase)) {
     return res.status(409).json({ error: "当前环节不支持对话修改" });
   }
+  if (phase === "逐页生成" && chapter) {
+    const chapterKey = basename(chapter);
+    if (!chapterGeneration(job).chapters.some((item) => item.key === chapterKey)) {
+      return res.status(404).json({ error: "没有找到要修改的章节" });
+    }
+  }
 
   const f = db
     .prepare("INSERT INTO feedback (job_id, chapter, phase, message, status, progress, progress_message) VALUES (?, ?, ?, ?, 'running', 5, ?)")
     .run(job.id, chapter ?? null, phase, message, "修改请求已提交，等待模型开始");
+  if (chapter && phase === "逐页生成") {
+    db.prepare(`
+      INSERT INTO chapter_reviews (job_id, chapter_key, status) VALUES (?, ?, 'review')
+      ON CONFLICT(job_id, chapter_key) DO UPDATE SET status = 'review', updated_at = datetime('now')
+    `).run(job.id, basename(chapter));
+  }
   res.json({ feedbackId: f.lastInsertRowid }); // respond immediately; agent runs async
 
   try {

@@ -56,10 +56,33 @@ export interface Feedback {
   created_at: string;
 }
 
+export interface ChapterReview {
+  key: string;
+  index: number;
+  title: string;
+  steps: number;
+  ready: boolean;
+  status: "queued" | "generating" | "review" | "approved";
+}
+
+export interface ChapterGeneration {
+  service: string;
+  expected: number;
+  discovered: number;
+  ready: number;
+  completed: number;
+  approved: number;
+  percent: number;
+  current: { current: number; total: number; chapter: string; status: string; message: string } | null;
+  message: string;
+  chapters: ChapterReview[];
+}
+
 export interface JobDetail extends Job {
   meta: string;
   events: JobEvent[];
   feedback: Feedback[];
+  chapterGeneration: ChapterGeneration;
   devServer: { running: boolean; port?: number; url?: string };
 }
 
@@ -243,6 +266,8 @@ export const api = {
       method: "DELETE",
     }),
   approve: (id: number) => req(`/jobs/${id}/approve`, { method: "POST" }),
+  approveChapter: (id: number, chapter: string) =>
+    req(`/jobs/${id}/chapters/${encodeURIComponent(chapter)}/approve`, { method: "POST" }),
   retry: (id: number, stage?: string) =>
     req(`/jobs/${id}/retry`, {
       method: "POST",

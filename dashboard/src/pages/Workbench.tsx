@@ -24,6 +24,13 @@ const phaseSubs = [
   "上传形象 · 对口型",
   "带声音完整播放",
 ];
+const conversationalPhases = new Set([
+  "文案确认",
+  "口播稿审阅",
+  "逐页生成",
+  "配音字幕",
+  "数字人",
+]);
 const themes = [
   {
     id: "midnight-press",
@@ -117,7 +124,8 @@ export function Workbench({
   const [assets, setAssets] = useState<AvatarAsset[]>([]);
   const [avatarPreviews, setAvatarPreviews] = useState<AvatarPreview[]>([]);
   const [selected, setSelected] = useState<number | null>(null);
-  const [message, setMessage] = useState("");
+  const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
+  const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [uploadState, setUploadState] = useState("");
   const [regenerateState, setRegenerateState] = useState("");
@@ -161,9 +169,31 @@ export function Workbench({
     }
     lastCurrent.current = next;
   }, [job?.stage, job?.status, selected]);
+  useEffect(() => {
+    const chapters = job?.chapterGeneration?.chapters || [];
+    if (!chapters.length) {
+      setSelectedChapter(null);
+      return;
+    }
+    if (selectedChapter && chapters.some((chapter) => chapter.key === selectedChapter)) return;
+    setSelectedChapter((chapters.find((chapter) => chapter.status !== "approved") || chapters[0]).key);
+  }, [job?.chapterGeneration?.chapters, selectedChapter]);
   const meta = useMemo(() => (job ? parseMeta(job) : {}), [job]);
   if (!job || selected === null) return <WorkbenchLoading />;
   const current = phaseIndex(job);
+  const activePhase = phases[selected];
+  const chatEnabled = conversationalPhases.has(activePhase)
+    && (activePhase !== "逐页生成" || Boolean(selectedChapter));
+  const chapterScope = activePhase === "逐页生成" ? selectedChapter : null;
+  const phaseFeedback = job.feedback.filter((item) =>
+    item.phase === activePhase && (activePhase !== "逐页生成" || item.chapter === chapterScope),
+  );
+  const draftKey = chapterScope ? `${activePhase}:${chapterScope}` : activePhase;
+  const message = messageDrafts[draftKey] || "";
+  const chapterGeneration = job.chapterGeneration;
+  const activeChapter = chapterGeneration.chapters.find((chapter) => chapter.key === selectedChapter) || null;
+  const allChaptersApproved = chapterGeneration.chapters.length > 0
+    && chapterGeneration.approved === chapterGeneration.chapters.length;
   const styleEditable = job.stage === "gate_style" && job.status === "waiting_approval";
   const canView = (index: number) => index <= current || job.status === "done";
   const previewUrl = job.devServer.url;
@@ -464,6 +494,69 @@ export function Workbench({
         <>
           <p className="vf-kicker">画面预览</p>
           <h2>逐页生成结果</h2>
+          <section className="vf-chapter-monitor">
+            <header>
+              <div>
+                <span>生成服务</span>
+                <b>{chapterGeneration.service}</b>
+              </div>
+              <strong>{chapterGeneration.completed}/{chapterGeneration.current?.total || chapterGeneration.expected || "?"} 章</strong>
+            </header>
+            <progress max="100" value={chapterGeneration.percent} />
+            <p>{chapterGeneration.message}</p>
+            {chapterGeneration.chapters.length > 0 && (
+              <div className="vf-chapter-review-list">
+                {chapterGeneration.chapters.map((chapter) => (
+                  <button
+                    key={chapter.key}
+                    className={selectedChapter === chapter.key ? "selected" : ""}
+                    onClick={() => setSelectedChapter(chapter.key)}
+                  >
+                    <i className={chapter.status}>
+                      {chapter.status === "approved" ? "✓" : chapter.index}
+                    </i>
+                    <span>
+                      <b>{chapter.title}</b>
+                      <small>
+                        {chapter.status === "approved"
+                          ? "已确认"
+                          : chapter.status === "queued"
+                            ? "等待生成"
+                            : chapter.status === "generating"
+                              ? "正在生成"
+                            : chapter.ready
+                              ? `待确认 · ${chapter.steps} 个画面步骤`
+                              : "正在生成"}
+                      </small>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </section>
+          {activeChapter && (
+            <div className="vf-chapter-focus">
+              <span>当前调试章节</span>
+              <b>{activeChapter.index}. {activeChapter.title}</b>
+              {job.stage === "gate_chapters" && activeChapter.ready && activeChapter.status !== "approved" && (
+                <button
+                  className="vf-primary"
+                  disabled={busy}
+                  onClick={async () => {
+                    setBusy(true);
+                    try {
+                      await api.approveChapter(job.id, activeChapter.key);
+                      await load();
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}
+                >
+                  {busy ? "正在确认…" : "本章画面通过"}
+                </button>
+              )}
+            </div>
+          )}
           {previewUrl ? (
             <iframe
               className="vf-live-preview"
@@ -494,9 +587,10 @@ export function Workbench({
             {job.stage === "gate_chapters" && (
               <button
                 className="vf-primary"
+                disabled={!allChaptersApproved || busy}
                 onClick={() => api.approve(job.id).then(load)}
               >
-                画面通过，继续
+                {allChaptersApproved ? "全部画面通过，进入配音" : `还需确认 ${chapterGeneration.chapters.length - chapterGeneration.approved} 章`}
               </button>
             )}
           </div>
@@ -764,16 +858,16 @@ export function Workbench({
           <em>{job.status === "queued" ? "等待开始" : "进行中"}</em>
         </div>
       )}
-      <div className={`vf-studio ${selected === 2 ? "vf-studio-full" : ""}`}>
+      <div className={`vf-studio ${!chatEnabled ? "vf-studio-full" : ""}`}>
         <section className="vf-stage-panel">{content}</section>
-        <aside className={`vf-chat ${selected === 2 ? "vf-chat-disabled" : ""}`}>
+        {chatEnabled && <aside className="vf-chat">
           <header>
             <h3>对话修改</h3>
-            <p>当前查看：{phases[selected]}</p>
+            <p>当前查看：{activePhase}{activeChapter && activePhase === "逐页生成" ? ` · 第 ${activeChapter.index} 章` : ""}</p>
           </header>
           <div className="vf-chat-log">
-            {job.feedback.length ? (
-              job.feedback.map((item) => (
+            {phaseFeedback.length ? (
+              phaseFeedback.map((item) => (
                 <p key={item.id} className="vf-chat-message">
                   {item.message}
                   {item.status === "running" && <span className="vf-feedback-progress" aria-label={`修改进度 ${item.progress || 0}%`}><i style={{ width: `${item.progress || 0}%` }} /></span>}
@@ -794,21 +888,21 @@ export function Workbench({
           <div className="vf-chat-input">
             <textarea
               value={message}
-              onChange={(e) => setMessage(e.target.value)}
+              onChange={(e) => setMessageDrafts((drafts) => ({ ...drafts, [draftKey]: e.target.value }))}
               placeholder="说说你想怎么改…"
             />
             <button
               onClick={async () => {
                 if (!message.trim()) return;
-              await api.sendFeedback(job.id, null, message, phases[selected]);
-                setMessage("");
+                await api.sendFeedback(job.id, chapterScope, message, activePhase);
+                setMessageDrafts((drafts) => ({ ...drafts, [draftKey]: "" }));
                 await load();
               }}
             >
               →
             </button>
           </div>
-        </aside>
+        </aside>}
       </div>
     </main>
   );

@@ -56,6 +56,16 @@ CREATE TABLE IF NOT EXISTS feedback (
   created_at TEXT DEFAULT (datetime('now'))
 );
 
+CREATE TABLE IF NOT EXISTS chapter_reviews (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  job_id INTEGER NOT NULL,
+  chapter_key TEXT NOT NULL,
+  status TEXT NOT NULL DEFAULT 'review',
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now')),
+  UNIQUE(job_id, chapter_key)
+);
+
 CREATE TABLE IF NOT EXISTS usage_events (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
   service TEXT NOT NULL,

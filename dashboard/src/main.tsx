@@ -7,6 +7,7 @@ import "./works-covers.css";
 import "./douyin-extractions.css";
 import "./settings-layout.css";
 import "./usage.css";
+import "./chapter-progress.css";
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>

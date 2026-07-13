@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
-import { logEvent, recordUsage } from "./db.js";
+import { db, logEvent, recordUsage } from "./db.js";
 import { runAgent } from "./agentRunner.js";
 import { health as heygemHealth, submitJob, taskStatus, downloadResult } from "./heygem.js";
 
@@ -129,6 +129,7 @@ function ensureNativeScaffold(skill, target, theme) {
   mkdirSync(join(target, "public"), { recursive: true });
   copyFileSync(tokens, join(target, "src", "styles", "tokens.css"));
   rmSync(join(target, "src", "chapters", "01-example"), { recursive: true, force: true });
+  rmSync(join(target, ".videoforge-chapter-progress.json"), { force: true });
   writeFileSync(join(target, ".theme"), `${theme}\n`);
   return { existing };
 }
@@ -166,6 +167,7 @@ const runners = {
     const theme = jobOptions(job).theme || config.theme;
     const target = join(job.workspace, "presentation");
     try {
+      db.prepare("DELETE FROM chapter_reviews WHERE job_id = ?").run(job.id);
       const { existing } = ensureNativeScaffold(skill, target, theme);
       logEvent(job.id, "scaffold", existing ? `已保留现有章节并切换主题：${theme}` : `已创建原生画面工程：${theme}`);
       if (!existsSync(join(target, "node_modules"))) {
@@ -202,6 +204,8 @@ const runners = {
       ``,
       `任务：按 outline.md 把全部章节开发完成。规范（必须照做）：`,
       `- 每章开发前重读 ${skill}/references/CHAPTER-CRAFT.md（单一必读入口）`,
+      `- 开始每章前必须更新 presentation/.videoforge-chapter-progress.json，格式为 {"current":当前序号,"total":总章节数,"chapter":"章节目录名","status":"generating","message":"正在生成本章画面"}`,
+      `- 每章代码与自检完成后把同一文件的 status 改为 "checking"、message 改为 "本章完成，正在检查"，再开始下一章；全部完成后写 status "done"`,
       `- 每章独立文件夹 + 独立 CSS 前缀 + narrations.ts（长度 = step 数）`,
       `- 全部注册进 src/registry/chapters.ts，每次结构变化 bump useStepper.ts 的 STORAGE_KEY`,
       `- 颜色/字体只用主题 token；正文字号 ≥ 20px（本项目用户明确偏好大字）`,
