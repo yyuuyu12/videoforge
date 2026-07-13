@@ -685,7 +685,7 @@ export function Workbench({
         <button onClick={onBack}>← 返回作品</button>
         <div>
           <span>作品 #{job.id}</span>
-          <h1>{job.title}</h1>
+          <h1 title={job.title ?? "未命名作品"}>{job.title ?? "未命名作品"}</h1>
         </div>
         <em>
           {job.status === "done"

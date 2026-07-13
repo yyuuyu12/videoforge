@@ -43,5 +43,5 @@
 }
 
 .vf-cover-copy small { margin-bottom: 5px; color: rgba(255,255,255,.72); font: 700 9px/1.2 ui-monospace, monospace; }
-.vf-cover-copy b { display: -webkit-box; overflow: hidden; font: 700 16px/1.35 Georgia,"Noto Sans SC",serif; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
+.vf-cover-copy b { display: block; overflow: hidden; font: 700 16px/1.35 Georgia,"Noto Sans SC",serif; text-overflow: ellipsis; white-space: nowrap; }
 .vf-cover-copy em { display: -webkit-box; overflow: hidden; margin-top: 6px; color: rgba(255,255,255,.72); font-size: 10px; font-style: normal; line-height: 1.4; -webkit-box-orient: vertical; -webkit-line-clamp: 2; }
