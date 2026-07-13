@@ -129,6 +129,7 @@ export function Workbench({
   const [busy, setBusy] = useState(false);
   const [uploadState, setUploadState] = useState("");
   const [regenerateState, setRegenerateState] = useState("");
+  const [previewError, setPreviewError] = useState("");
   const lastCurrent = useRef<number | null>(null);
   const load = () =>
     api
@@ -206,9 +207,12 @@ export function Workbench({
   const ensurePreview = async () => {
     if (!job.devServer.running) {
       setBusy(true);
+      setPreviewError("");
       try {
         await api.devStart(job.id);
         await load();
+      } catch (error) {
+        setPreviewError(error instanceof Error ? error.message : "预览服务启动失败");
       } finally {
         setBusy(false);
       }
@@ -593,6 +597,7 @@ export function Workbench({
               </button>
             )}
           </div>
+          {previewError && <p className="vf-inline-error">预览启动失败：{previewError}</p>}
         </>
       );
     if (selected === 4)

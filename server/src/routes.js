@@ -765,11 +765,11 @@ api.get("/jobs/:id/files/:name", (req, res) => {
 
 // ---- per-job preview dev server ----------------------------------------------
 
-api.post("/jobs/:id/devserver/start", (req, res) => {
+api.post("/jobs/:id/devserver/start", async (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "not found" });
   try {
-    res.json(startDevServer(job.id, job.workspace));
+    res.json(await startDevServer(job.id, job.workspace));
   } catch (err) {
     res.status(409).json({ error: err.message });
   }
