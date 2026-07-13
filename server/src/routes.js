@@ -1,6 +1,6 @@
 import { Router } from "express";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, statSync, unlinkSync, writeFileSync } from "node:fs";
-import { basename, join } from "node:path";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
+import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { config } from "./config.js";
 import { db, getJob, logEvent, updateJob } from "./db.js";
 import { fetchArticleText, runDiscovery } from "./workers/discovery.js";
@@ -279,6 +279,42 @@ api.get("/jobs", (_req, res) => {
     ORDER BY jobs.id DESC
     LIMIT 100
   `).all());
+});
+
+api.delete("/jobs/:id", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "作品不存在或已经删除" });
+  if (["queued", "running"].includes(job.status)) {
+    return res.status(409).json({ error: "作品正在生成，完成或失败后才能删除" });
+  }
+
+  const root = resolve(config.workspacesRoot);
+  const workspace = resolve(job.workspace);
+  const workspaceRelative = relative(root, workspace);
+  if (!workspaceRelative || workspaceRelative.startsWith("..") || isAbsolute(workspaceRelative)) {
+    return res.status(409).json({ error: "作品工作区路径异常，已停止删除" });
+  }
+
+  stopDevServer(job.id);
+  try {
+    if (existsSync(workspace)) rmSync(workspace, { recursive: true, force: true });
+  } catch (error) {
+    return res.status(500).json({ error: `作品文件删除失败：${error.message}` });
+  }
+
+  db.exec("BEGIN");
+  try {
+    db.prepare("UPDATE douyin_extractions SET job_id = NULL, updated_at = datetime('now') WHERE job_id = ?").run(job.id);
+    db.prepare("DELETE FROM feedback WHERE job_id = ?").run(job.id);
+    db.prepare("DELETE FROM job_events WHERE job_id = ?").run(job.id);
+    db.prepare("DELETE FROM jobs WHERE id = ?").run(job.id);
+    db.exec("COMMIT");
+  } catch (error) {
+    db.exec("ROLLBACK");
+    return res.status(500).json({ error: `作品记录删除失败：${error.message}` });
+  }
+
+  res.json({ ok: true, workspaceRemoved: true });
 });
 
 // ---- persistent Douyin extraction tasks ------------------------------------

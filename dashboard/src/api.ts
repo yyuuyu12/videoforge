@@ -178,6 +178,10 @@ export const api = {
     req<{ jobId: number }>(`/articles/${id}/select`, { method: "POST" }),
   jobs: () => req<Job[]>("/jobs"),
   job: (id: number) => req<JobDetail>(`/jobs/${id}`),
+  deleteJob: (id: number) =>
+    req<{ ok: boolean; workspaceRemoved: boolean }>(`/jobs/${id}`, {
+      method: "DELETE",
+    }),
   approve: (id: number) => req(`/jobs/${id}/approve`, { method: "POST" }),
   retry: (id: number, stage?: string) =>
     req(`/jobs/${id}/retry`, {
