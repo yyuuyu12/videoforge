@@ -711,9 +711,9 @@ export function Workbench({
           <em>{job.status === "queued" ? "等待开始" : "进行中"}</em>
         </div>
       )}
-      <div className="vf-studio">
+      <div className={`vf-studio ${selected === 2 ? "vf-studio-full" : ""}`}>
         <section className="vf-stage-panel">{content}</section>
-        <aside className="vf-chat">
+        <aside className={`vf-chat ${selected === 2 ? "vf-chat-disabled" : ""}`}>
           <header>
             <h3>对话修改</h3>
             <p>当前查看：{phases[selected]}</p>

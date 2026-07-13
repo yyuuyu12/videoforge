@@ -104,6 +104,7 @@ if (!feedbackColumns.includes("progress")) db.exec("ALTER TABLE feedback ADD COL
 if (!feedbackColumns.includes("progress_message")) db.exec("ALTER TABLE feedback ADD COLUMN progress_message TEXT");
 if (!feedbackColumns.includes("error")) db.exec("ALTER TABLE feedback ADD COLUMN error TEXT");
 if (!feedbackColumns.includes("result")) db.exec("ALTER TABLE feedback ADD COLUMN result TEXT");
+if (!feedbackColumns.includes("phase")) db.exec("ALTER TABLE feedback ADD COLUMN phase TEXT");
 
 // ---- tiny helpers ---------------------------------------------------------
 

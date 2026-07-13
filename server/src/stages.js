@@ -320,7 +320,7 @@ export async function runStage(job) {
 export async function runFeedback(job, { chapter, message, phase, onProgress = () => {} }) {
   onProgress(10, "正在理解你的修改要求");
   const skill = config.skills.webVideoPresentation;
-  const scopeLine = phase === "文案确认"
+  let scopeLine = phase === "文案确认"
     ? `当前查看“文案确认”：只允许修改 article.md，不得修改其他文件。`
     : phase === "口播稿审阅"
       ? `当前查看“口播稿审阅”：只允许修改 script.md；若章节标题变化，可同步 outline.md 的对应标题。不得修改 presentation。`
@@ -329,6 +329,11 @@ export async function runFeedback(job, { chapter, message, phase, onProgress = (
         : chapter
           ? `本次只允许修改 presentation/src/chapters/${chapter}/ 内的文件（如结构变化才允许动 chapters.ts / useStepper.ts 的 STORAGE_KEY）。`
           : `当前查看“${phase || "画面"}”：只允许修改 presentation 内与反馈直接相关的文件，改动范围尽量小。`;
+  if (phase === "配音字幕") {
+    scopeLine = `当前环节只允许修改 narration、字幕和音频相关文件，不得修改 presentation 的布局、主题或章节正文。`;
+  } else if (phase === "数字人") {
+    scopeLine = `当前环节只允许修改数字人素材、口型视频接入和相关配置，不得修改文案、口播稿、主题或页面布局。`;
+  }
   const prompt = [
     `当前目录是一个 VideoForge 作品工作区，用户正在“${phase || "画面调试"}”环节提出修改反馈。`,
     `用户反馈：${message}`,

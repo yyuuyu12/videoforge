@@ -46,6 +46,7 @@ export interface JobEvent {
 export interface Feedback {
   id: number;
   chapter: string | null;
+  phase: string | null;
   message: string;
   status: string;
   progress: number;

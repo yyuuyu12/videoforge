@@ -596,10 +596,14 @@ api.post("/jobs/:id/feedback", async (req, res) => {
   if (!job) return res.status(404).json({ error: "not found" });
   const { chapter, message, phase } = req.body ?? {};
   if (!message) return res.status(400).json({ error: "message required" });
+  const feedbackPhases = ["文案确认", "口播稿审阅", "逐页生成", "配音字幕", "数字人"];
+  if (!feedbackPhases.includes(phase)) {
+    return res.status(409).json({ error: "当前环节不支持对话修改" });
+  }
 
   const f = db
-    .prepare("INSERT INTO feedback (job_id, chapter, message, status, progress, progress_message) VALUES (?, ?, ?, 'running', 5, ?)")
-    .run(job.id, chapter ?? null, message, "修改请求已提交，等待模型开始");
+    .prepare("INSERT INTO feedback (job_id, chapter, phase, message, status, progress, progress_message) VALUES (?, ?, ?, ?, 'running', 5, ?)")
+    .run(job.id, chapter ?? null, phase, message, "修改请求已提交，等待模型开始");
   res.json({ feedbackId: f.lastInsertRowid }); // respond immediately; agent runs async
 
   try {
