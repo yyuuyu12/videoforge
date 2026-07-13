@@ -1,5 +1,5 @@
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { logEvent, recordUsage } from "./db.js";
@@ -64,9 +64,73 @@ function avatarProgress(jobId, percent, message) {
   logEvent(jobId, "avatar_gen", `progress|${Math.max(0, Math.min(100, Math.round(percent)))}|${message}`);
 }
 
-function bashPath(value) {
-  const normalized = value.replace(/\\/g, "/");
-  return normalized.replace(/^([A-Za-z]):\//, (_match, drive) => `/mnt/${drive.toLowerCase()}/`);
+function writeJson(path, value) {
+  writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
+}
+
+function ensureNativeScaffold(skill, target, theme) {
+  const templates = join(skill, "templates");
+  const tokens = join(skill, "themes", theme, "tokens.css");
+  if (!existsSync(tokens)) throw new Error(`找不到画面主题：${theme}`);
+
+  const existing = existsSync(join(target, "package.json")) && existsSync(join(target, "src", "App.tsx"));
+  mkdirSync(target, { recursive: true });
+  if (!existing) {
+    cpSync(join(templates, "src"), join(target, "src"), { recursive: true, force: true });
+    cpSync(join(templates, "scripts"), join(target, "scripts"), { recursive: true, force: true });
+    copyFileSync(join(templates, "index.html"), join(target, "index.html"));
+    copyFileSync(join(templates, "vite.config.ts"), join(target, "vite.config.ts"));
+    writeJson(join(target, "package.json"), {
+      name: "presentation",
+      private: true,
+      version: "0.0.0",
+      type: "module",
+      scripts: {
+        dev: "vite",
+        build: "tsc -b && vite build",
+        "extract-narrations": "tsx scripts/extract-narrations.ts",
+      },
+      dependencies: { react: "^18.3.1", "react-dom": "^18.3.1" },
+      devDependencies: {
+        "@types/node": "^22.10.2",
+        "@types/react": "^18.3.12",
+        "@types/react-dom": "^18.3.1",
+        "@vitejs/plugin-react": "^4.3.4",
+        tsx: "^4.19.2",
+        typescript: "^5.7.2",
+        vite: "^6.0.0",
+      },
+    });
+    writeJson(join(target, "tsconfig.json"), {
+      files: [],
+      references: [{ path: "./tsconfig.app.json" }, { path: "./tsconfig.node.json" }],
+    });
+    writeJson(join(target, "tsconfig.app.json"), {
+      compilerOptions: {
+        target: "ES2020", lib: ["ES2020", "DOM", "DOM.Iterable"], module: "ESNext",
+        skipLibCheck: true, moduleResolution: "bundler", allowImportingTsExtensions: true,
+        isolatedModules: true, moduleDetection: "force", noEmit: true, jsx: "react-jsx",
+        strict: true, noUnusedLocals: true, noUnusedParameters: true, noFallthroughCasesInSwitch: true,
+      },
+      include: ["src"],
+    });
+    writeJson(join(target, "tsconfig.node.json"), {
+      compilerOptions: {
+        target: "ES2022", lib: ["ES2023"], module: "ESNext", skipLibCheck: true,
+        moduleResolution: "bundler", allowImportingTsExtensions: true, isolatedModules: true,
+        moduleDetection: "force", noEmit: true, strict: true,
+      },
+      include: ["vite.config.ts"],
+    });
+    writeFileSync(join(target, ".gitignore"), "node_modules\ndist\n");
+  }
+
+  mkdirSync(join(target, "src", "styles"), { recursive: true });
+  mkdirSync(join(target, "public"), { recursive: true });
+  copyFileSync(tokens, join(target, "src", "styles", "tokens.css"));
+  rmSync(join(target, "src", "chapters", "01-example"), { recursive: true, force: true });
+  writeFileSync(join(target, ".theme"), `${theme}\n`);
+  return { existing };
 }
 
 function jobOptions(job) {
@@ -100,18 +164,18 @@ const runners = {
   async scaffold(job) {
     const skill = config.skills.webVideoPresentation;
     const theme = jobOptions(job).theme || config.theme;
-    const scaffoldSh = bashPath(`${skill}/scripts/scaffold.sh`);
-    const r = await sh(
-      "bash",
-      [JSON.stringify(scaffoldSh), "./presentation", `--theme=${theme}`],
-      job.workspace,
-      job.id,
-      "scaffold",
-    );
-    if (!r.ok) return r;
-    // Remove the demo chapter so chapter_gen starts clean.
-    await sh("bash", ["-c", '"rm -rf presentation/src/chapters/01-example"'], job.workspace, job.id, "scaffold");
-    return { ok: true };
+    const target = join(job.workspace, "presentation");
+    try {
+      const { existing } = ensureNativeScaffold(skill, target, theme);
+      logEvent(job.id, "scaffold", existing ? `已保留现有章节并切换主题：${theme}` : `已创建原生画面工程：${theme}`);
+      if (!existsSync(join(target, "node_modules"))) {
+        const install = await sh("npm", ["install"], target, job.id, "scaffold");
+        if (!install.ok) return install;
+      }
+      return sh("npx", ["tsc", "--noEmit"], target, job.id, "scaffold");
+    } catch (error) {
+      return { ok: false, note: error.message };
+    }
   },
 
   /**
