@@ -542,9 +542,9 @@ api.get("/jobs/:id/audit", async (req, res) => {
     return {
       chapter: entry.name,
       reserved:
-        /padding-right:\s*(6\d\d|7\d\d)px/.test(content) ||
-        /grid-template-columns:[^;]*(6\d\d|7\d\d)px/.test(content) ||
-        /(?:reserved|presenter|avatar)[^{]*\{[^}]*width:\s*(6\d\d|7\d\d)px/is.test(content),
+        /padding-right:\s*(44[0-9]|45[0-9]|6\d\d|7\d\d)px/.test(content) ||
+        /grid-template-columns:[^;]*(44[0-9]|45[0-9]|6\d\d|7\d\d)px/.test(content) ||
+        /(?:reserved|presenter|avatar)[^{]*\{[^}]*width:\s*(44[0-9]|45[0-9]|6\d\d|7\d\d)px/is.test(content),
     };
   });
   const audioRoot = join(pres, "public", "audio");

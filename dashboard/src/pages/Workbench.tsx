@@ -326,7 +326,7 @@ export function Workbench({
                     [
                       "right-third",
                       "右侧讲师区",
-                      "右侧约 1/3 留给人物，接近你发的参考图",
+                      "保持右侧原位置，比标准 1/3 区域缩小 30%",
                     ],
                   ].map(([value, label, desc]) => (
                     <button
@@ -375,6 +375,31 @@ export function Workbench({
                 }}
               >
                 {busy ? "正在提交…" : "确认风格，开始生成画面"}
+              </button>
+            </div>
+          )}
+          {job.stage === "scaffold" && job.status === "failed" && (
+            <div className="vf-style-confirm vf-style-recovery">
+              <div>
+                <b>画面工程准备失败，尚未开始生成画面</b>
+                <span>先返回风格确认；你可以调整风格和数字人占位，再重新进入下一步。</span>
+              </div>
+              <button
+                className="vf-primary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  setRegenerateState("正在恢复风格选择…");
+                  try {
+                    await api.retry(job.id, "gate_style");
+                    setSelected(2);
+                    await load();
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy ? "正在恢复…" : "重新选择风格"}
               </button>
             </div>
           )}

@@ -125,10 +125,10 @@ const runners = {
     const options = jobOptions(job);
     const theme = options.theme || config.theme;
     const avatar = options.avatar || {};
-    const avatarPosition = avatar.position === "right-top" ? "右上角小窗" : avatar.position === "right-bottom" ? "右下角小窗" : "右侧约三分之一讲师区";
-    const avatarReserve = avatar.position === "right-third" ? 640 : 360;
+    const avatarPosition = avatar.position === "right-top" ? "右上角小窗" : avatar.position === "right-bottom" ? "右下角小窗" : "右侧讲师区（较标准三分之一区域缩小 30%）";
+    const avatarReserve = avatar.position === "right-third" ? 448 : 360;
     const avatarLayout = options.avatar?.enabled
-      ? `本片启用讲师数字人：人物位于${avatarPosition}，所有章节正文必须为右侧讲师窗口预留 ${avatarReserve}px，不得把关键文字或图表放入该区域。逐章检查并重新排版所有已经存在的页面，不能只加一个视频浮层。`
+      ? `本片启用讲师数字人：人物位于${avatarPosition}，所有章节正文必须为右侧讲师窗口预留 ${avatarReserve}px，不得把关键文字或图表放入该区域。讲师窗口保持右侧原锚点，宽度不得放大、不得居中或向左移动。逐章检查并重新排版所有已经存在的页面，不能只加一个视频浮层。`
       : "本片暂未启用讲师数字人。";
     const prompt = [
       `你在一个视频生成流水线的无人值守环节中工作。当前目录是一个已完成 Phase 1 的 web-video-presentation 项目：`,
@@ -270,12 +270,12 @@ const runners = {
           avatarProgress(job.id, 91 + (chapterIndex / groups.size) * 4, `已生成章节预览 ${chapterIndex}/${groups.size}`);
         }
         const skill = config.skills.videoAvatarSubtitles;
-        const position = meta.avatar.position === "right-top" ? "右上角小窗" : meta.avatar.position === "right-bottom" ? "右下角小窗" : "右侧约三分之一讲师区";
-        const reserve = meta.avatar.position === "right-third" ? 640 : 360;
+        const position = meta.avatar.position === "right-top" ? "右上角小窗" : meta.avatar.position === "right-bottom" ? "右下角小窗" : "右侧讲师区（较标准三分之一区域缩小 30%）";
+        const reserve = meta.avatar.position === "right-third" ? 448 : 360;
         const prompt = [
           `当前目录是已完成配音与字幕的网页演示，public/avatar/lipsync.mp4 是刚生成的全片数字人对口型视频。`,
           `严格按照 ${skill}/references/AVATAR-PIPELINE.md 接入讲师窗口：`,
-          `- 本作品选择的位置是${position}，右侧预留宽度是 ${reserve}px；人物窗口 right 40px、圆角 28px`,
+          `- 本作品选择的位置是${position}，右侧预留宽度是 ${reserve}px；人物窗口 right 40px、圆角 28px，保持原右侧锚点，不得居中或向左移动`,
           `- 所有 PPT 正文永久为右侧预留 ${reserve}px，逐页重排，关键文字、图表不得进入这一区域`,
           `- video 必须 muted、playsInline，由当前音频时间轴驱动，不得让它自由播放`,
           `- 跟随每个 step 的真实累计音频位置同步，切换 step 时不得从视频开头重播`,
