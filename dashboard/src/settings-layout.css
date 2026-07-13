@@ -1,4 +1,4 @@
-.vf-settings-card { max-width: 860px; }
+.vf-settings-card { width:100%; max-width:none; }
 .vf-settings-card h3 { margin-bottom: 16px; }
 .vf-settings-modes { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; margin-bottom:14px; }
 .vf-radio-option { display:flex; min-height:42px; align-items:center; gap:8px; margin:0; padding:9px 11px; border:1px solid rgba(138,90,51,.16); border-radius:8px; background:rgba(255,255,255,.42); color:#5e4936; font-size:12px; line-height:1.4; }
