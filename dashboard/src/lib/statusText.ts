@@ -16,6 +16,8 @@ export function workStatus(work: Pick<Job, "status" | "stage">): WorkStatus {
     return { label: "制作完成", detail: "可以预览并录制成片", action: "查看作品", tone: "success" };
   if (work.status === "waiting_approval" && work.stage === "gate_script")
     return { label: "等你确认稿子", detail: "口播稿已经写好", action: "去看稿子", tone: "waiting" };
+  if (work.status === "waiting_approval" && work.stage === "gate_style")
+    return { label: "等你选风格", detail: "确认画面风格和数字人占位", action: "去选择", tone: "waiting" };
   if (work.status === "waiting_approval" && work.stage === "gate_chapters")
     return { label: "等你验收画面", detail: "画面已经生成，可以预览", action: "去预览", tone: "waiting" };
 
@@ -33,6 +35,7 @@ export function workStatus(work: Pick<Job, "status" | "stage">): WorkStatus {
 export const productionSteps = [
   { id: "script_outline", label: "写稿" },
   { id: "gate_script", label: "确认稿子" },
+  { id: "gate_style", label: "选择风格" },
   { id: "scaffold", label: "搭建" },
   { id: "chapter_gen", label: "制作画面" },
   { id: "gate_chapters", label: "验收画面" },

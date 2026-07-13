@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type AvatarAsset,
@@ -52,7 +52,7 @@ const themes = [
 ];
 const stageProgress: Record<string, string> = {
   script_outline: "正在生成口播稿和画面规划",
-  scaffold: "正在准备画面工程",
+  scaffold: "风格已确认，正在创建画面工程（通常需要 10–30 秒）",
   chapter_gen: "正在逐页生成并检查画面",
   audio_synth: "正在生成配音和逐字时间轴",
   subtitle_cues: "正在生成并校验字幕",
@@ -69,7 +69,7 @@ function parseMeta(job: JobDetail) {
 function phaseIndex(job: JobDetail) {
   if (job.stage === "script_outline") return 0;
   if (job.stage === "gate_script") return 1;
-  if (job.stage === "scaffold") return 2;
+  if (["gate_style", "scaffold"].includes(job.stage)) return 2;
   if (["chapter_gen", "gate_chapters"].includes(job.stage)) return 3;
   if (["audio_synth", "subtitle_cues"].includes(job.stage)) return 4;
   if (job.stage === "avatar_gen") return 5;
@@ -92,6 +92,7 @@ export function Workbench({
   const [busy, setBusy] = useState(false);
   const [uploadState, setUploadState] = useState("");
   const [regenerateState, setRegenerateState] = useState("");
+  const lastCurrent = useRef<number | null>(null);
   const load = () =>
     api
       .job(jobId)
@@ -123,8 +124,14 @@ export function Workbench({
       .catch(() => {});
   }, [jobId, job?.stage, job?.status]);
   useEffect(() => {
-    if (job && selected === null) setSelected(phaseIndex(job));
-  }, [job, selected]);
+    if (!job) return;
+    const next = phaseIndex(job);
+    const previous = lastCurrent.current;
+    if (selected === null || (previous !== null && next > previous && selected === previous)) {
+      setSelected(next);
+    }
+    lastCurrent.current = next;
+  }, [job?.stage, job?.status, selected]);
   const meta = useMemo(() => (job ? parseMeta(job) : {}), [job]);
   if (!job || selected === null)
     return <main className="vf-page">正在打开作品…</main>;
@@ -240,7 +247,11 @@ export function Workbench({
               </button>
               <button
                 className="vf-primary"
-                onClick={() => api.approve(job.id).then(load)}
+                onClick={async () => {
+                  await api.approve(job.id);
+                  setSelected(2);
+                  await load();
+                }}
               >
                 这版可以，继续
               </button>
@@ -341,6 +352,30 @@ export function Workbench({
               </>
             )}
           </section>
+          {job.stage === "gate_style" && (
+            <div className="vf-style-confirm">
+              <div>
+                <b>风格和人物占位确认完成后，才会开始生成画面</b>
+                <span>当前选择：{themes.find((theme) => theme.id === (meta.theme || "midnight-press"))?.name || "午夜刊物"} · {meta.avatar?.enabled ? "使用数字人" : "不使用数字人"}</span>
+              </div>
+              <button
+                className="vf-primary"
+                disabled={busy}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await api.approve(job.id);
+                    setSelected(2);
+                    await load();
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy ? "正在提交…" : "确认风格，开始生成画面"}
+              </button>
+            </div>
+          )}
           {current >= 3 && (
             <div className={`vf-regenerate ${regenerating ? "running" : ""}`}>
               <b>

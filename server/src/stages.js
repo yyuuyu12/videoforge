@@ -15,6 +15,7 @@ import { health as heygemHealth, submitJob, taskStatus, downloadResult } from ".
 export const STAGES = [
   { id: "script_outline", kind: "work", label: "口播稿 + Outline" },
   { id: "gate_script", kind: "gate", label: "稿件审批" },
+  { id: "gate_style", kind: "gate", label: "风格与数字人占位确认" },
   { id: "scaffold", kind: "work", label: "脚手架" },
   { id: "chapter_gen", kind: "work", label: "章节生成" },
   { id: "gate_chapters", kind: "gate", label: "章节验收（可反馈调试）" },
