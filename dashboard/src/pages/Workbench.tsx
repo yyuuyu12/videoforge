@@ -136,6 +136,7 @@ export function Workbench({
   if (!job || selected === null)
     return <main className="vf-page">正在打开作品…</main>;
   const current = phaseIndex(job);
+  const styleEditable = job.stage === "gate_style" && job.status === "waiting_approval";
   const canView = (index: number) => index <= current || job.status === "done";
   const previewUrl = job.devServer.url;
   const avatarProgressEvent = job.events.find(
@@ -165,17 +166,14 @@ export function Workbench({
       setBusy(false);
     }
   };
-  const regenerating =
-    job.stage === "chapter_gen" && ["queued", "running"].includes(job.status);
   const regenerate = async () => {
-    if (regenerating || busy) return;
+    if (busy) return;
     setBusy(true);
-    setRegenerateState("正在提交重新排版任务…");
+    setRegenerateState("正在返回风格选择…");
     try {
-      await api.retry(job.id, "chapter_gen");
-      setRegenerateState(
-        "任务已提交，正在逐页重新排版。可以停留在这里，也可以稍后回来查看。",
-      );
+      await api.retry(job.id, "gate_style");
+      setSelected(2);
+      setRegenerateState("请选择风格并确认，随后将按新风格重新生成。 ");
       await load();
     } catch (error) {
       setRegenerateState(
@@ -269,6 +267,7 @@ export function Workbench({
             {themes.map((theme) => (
               <button
                 key={theme.id}
+                disabled={!styleEditable || busy}
                 className={`vf-theme-option ${theme.tone} ${(meta.theme || "midnight-press") === theme.id ? "selected" : ""}`}
                 onClick={() => saveOptions({ theme: theme.id })}
               >
@@ -287,6 +286,7 @@ export function Workbench({
             <h3>是否加入你的形象</h3>
             <div className="vf-segments">
               <button
+                disabled={!styleEditable || busy}
                 className={!meta.avatar?.enabled ? "selected" : ""}
                 onClick={() =>
                   saveOptions({
@@ -297,6 +297,7 @@ export function Workbench({
                 不使用
               </button>
               <button
+                disabled={!styleEditable || busy}
                 className={meta.avatar?.enabled ? "selected" : ""}
                 onClick={() =>
                   saveOptions({
@@ -330,6 +331,7 @@ export function Workbench({
                   ].map(([value, label, desc]) => (
                     <button
                       key={value}
+                      disabled={!styleEditable || busy}
                       className={
                         (meta.avatar?.position || "right-third") === value
                           ? "selected"
@@ -376,24 +378,16 @@ export function Workbench({
               </button>
             </div>
           )}
-          {current >= 3 && (
-            <div className={`vf-regenerate ${regenerating ? "running" : ""}`}>
-              <b>
-                {regenerating
-                  ? "正在按当前布局重新生成全部画面"
-                  : "人物占位改变后，需要重新排版现有画面"}
-              </b>
-              <span>
-                {regenerating
-                  ? "后台正在逐页调整，完成后会停在“逐页生成”等你验收。"
-                  : "系统会逐页让开人物区域，不会只在最后盖一层视频。"}
-              </span>
+          {current >= 3 && ["waiting_approval", "failed"].includes(job.status) && job.stage !== "gate_style" && (
+            <div className="vf-regenerate">
+              <b>需要更换风格？</b>
+              <span>返回风格选择，确认后将按新风格重新生成后续画面。</span>
               <button
                 className="vf-primary"
-                disabled={regenerating || busy}
+                disabled={busy}
                 onClick={regenerate}
               >
-                {regenerating ? "正在重新生成…" : "按当前布局重新生成全部画面"}
+                重新选择风格
               </button>
               {regenerateState && (
                 <small

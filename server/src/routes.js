@@ -445,6 +445,9 @@ api.get("/jobs/:id", (req, res) => {
 api.put("/jobs/:id/options", (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "not found" });
+  if (job.stage !== "gate_style" || job.status !== "waiting_approval") {
+    return res.status(409).json({ error: "请先进入“选择风格”步骤，再修改风格或数字人设置" });
+  }
   let meta = {};
   try { meta = JSON.parse(job.meta || "{}"); } catch {}
   meta = { ...meta, ...(req.body ?? {}) };
