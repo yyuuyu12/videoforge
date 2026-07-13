@@ -337,6 +337,10 @@ export async function runFeedback(job, { chapter, message, phase, onProgress = (
     `修改前后必须自行检查 git diff（即使项目未纳入 git，也要逐文件核对），发现超出用户要求的改动必须撤回。`,
     `修改时遵守 ${skill}/references/CHAPTER-CRAFT.md 的规范（主题 token / 字号 ≥20px / 反AI味）。`,
     `完成后 npx tsc --noEmit 必须 0 错误。不要向用户提问，做完即退出。`,
+    `最后必须用中文输出简短回执，严格包含三段：`,
+    `具体修改：列出实际改动的文件或内容，不要只说“已优化”。`,
+    `修改思路：说明为什么这样调整，以及它如何回应用户要求。`,
+    `检查结果：列出实际执行的检查与结果；未执行的检查要如实说明。`,
   ].join("\n");
   onProgress(16, "已限定修改范围，正在启动模型");
   return runAgent({ jobId: job.id, stage: "debug", cwd: job.workspace, prompt, onProgress });

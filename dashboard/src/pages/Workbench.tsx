@@ -697,11 +697,12 @@ export function Workbench({
                   {item.status === "running" && <span className="vf-feedback-progress" aria-label={`修改进度 ${item.progress || 0}%`}><i style={{ width: `${item.progress || 0}%` }} /></span>}
                   <small className={item.status === "failed" ? "error" : ""}>
                     {item.status === "done"
-                      ? "已经按你的要求改好了"
+                      ? "已经按你的要求改好了，修改说明如下"
                       : item.status === "failed"
                         ? `修改失败：${item.error || "模型执行时遇到问题，请重试"}`
                         : `${item.progress_message || "正在理解你的修改要求"} · ${item.progress || 0}%`}
                   </small>
+                  {item.status === "done" && <span className="vf-feedback-result">{item.result || "这条修改在详细回执功能上线前完成，因此没有保存具体修改说明。后续修改会记录具体内容、思路和检查结果。"}</span>}
                 </p>
               ))
             ) : (

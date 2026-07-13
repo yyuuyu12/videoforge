@@ -24,6 +24,7 @@ button { cursor: pointer; }
 .vf-chat-message small.error { color:#a53e32; line-height:1.5; }
 .vf-feedback-progress { display:block; width:100%; height:4px; margin-top:9px; overflow:hidden; border-radius:99px; background:rgba(154,107,63,.13); }
 .vf-feedback-progress i { display:block; height:100%; border-radius:inherit; background:#9a6b3f; transition:width .35s ease; }
+.vf-feedback-result { display:block; margin-top:8px; padding:9px 10px; border-left:2px solid rgba(46,125,79,.46); background:rgba(46,125,79,.055); color:#5e5143; font-size:10px; line-height:1.65; white-space:pre-wrap; }
 .vf-work-actions { display:flex; align-items:center; justify-content:space-between; gap:12px; min-height:26px; }
 .vf-delete-button { border:0; padding:4px 0 4px 8px; background:transparent; color:#a08a70; font-size:12px; }
 .vf-delete-button:hover:not(:disabled) { color:#a53e32; }

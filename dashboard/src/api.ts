@@ -51,6 +51,7 @@ export interface Feedback {
   progress: number;
   progress_message: string | null;
   error: string | null;
+  result: string | null;
   created_at: string;
 }
 

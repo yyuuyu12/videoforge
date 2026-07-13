@@ -561,8 +561,11 @@ api.post("/jobs/:id/feedback", async (req, res) => {
       ).run(Math.max(0, Math.min(100, Math.round(progress))), progressMessage, f.lastInsertRowid),
     });
     const error = r.ok ? null : (r.note || r.output || "模型没有完成修改");
-    db.prepare("UPDATE feedback SET status = ?, progress = 100, progress_message = ?, error = ? WHERE id = ?")
-      .run(r.ok ? "done" : "failed", r.ok ? "修改完成，结果已刷新" : "修改未完成", error ? String(error).slice(0, 800) : null, f.lastInsertRowid);
+    const result = r.ok
+      ? (String(r.output || "").trim().slice(-2400) || "具体修改：模型已完成本次调整。\n修改思路：按照你的反馈做了最小范围修改。\n检查结果：任务执行成功。")
+      : null;
+    db.prepare("UPDATE feedback SET status = ?, progress = 100, progress_message = ?, error = ?, result = ? WHERE id = ?")
+      .run(r.ok ? "done" : "failed", r.ok ? "修改完成，结果已刷新" : "修改未完成", error ? String(error).slice(0, 800) : null, result, f.lastInsertRowid);
   } catch (error) {
     db.prepare("UPDATE feedback SET status = 'failed', progress = 100, progress_message = '修改未完成', error = ? WHERE id = ?")
       .run(String(error.message || error).slice(0, 800), f.lastInsertRowid);

@@ -103,6 +103,7 @@ const feedbackColumns = db.prepare("PRAGMA table_info(feedback)").all().map((col
 if (!feedbackColumns.includes("progress")) db.exec("ALTER TABLE feedback ADD COLUMN progress INTEGER NOT NULL DEFAULT 0");
 if (!feedbackColumns.includes("progress_message")) db.exec("ALTER TABLE feedback ADD COLUMN progress_message TEXT");
 if (!feedbackColumns.includes("error")) db.exec("ALTER TABLE feedback ADD COLUMN error TEXT");
+if (!feedbackColumns.includes("result")) db.exec("ALTER TABLE feedback ADD COLUMN result TEXT");
 
 // ---- tiny helpers ---------------------------------------------------------
 
