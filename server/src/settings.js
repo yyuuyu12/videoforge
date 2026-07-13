@@ -18,7 +18,7 @@ const DEFAULTS = {
     provider: "anthropic", // "anthropic" | "openai-compatible"
     baseUrl: "", // only for openai-compatible (e.g. https://api.deepseek.com/v1)
     apiKey: "",
-    model: "claude-sonnet-5",
+    model: "gpt-5.5",
   },
   minimax: {
     apiKey: "", // empty = fall back to MINIMAX_API_KEY env var (v1 behavior)
@@ -40,6 +40,9 @@ const DEFAULTS = {
     // The user's own service (local_asr_server, frp: asr.yyagent.top);
     // empty = skip ASR, fall back to the video description.
     baseUrl: "",
+    openAiBaseUrl: "",
+    apiKey: "",
+    model: "whisper-1",
   },
   search: {
     directions: "AI 编程工具, AI 行业动态", // 联网搜索选题的默认方向词
@@ -100,7 +103,7 @@ export function publicSettings() {
     },
     heygem: { ...s.heygem, token: undefined, tokenState: mask(s.heygem.token) },
     tikhub: { apiKeyState: mask(s.tikhub.apiKey) },
-    asr: { ...s.asr },
+    asr: { ...s.asr, apiKey: undefined, apiKeyState: mask(s.asr.apiKey) },
     search: { ...s.search },
   };
 }

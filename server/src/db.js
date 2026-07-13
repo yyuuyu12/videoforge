@@ -55,7 +55,32 @@ CREATE TABLE IF NOT EXISTS feedback (
   status TEXT DEFAULT 'pending',
   created_at TEXT DEFAULT (datetime('now'))
 );
+
+CREATE TABLE IF NOT EXISTS douyin_extractions (
+  id INTEGER PRIMARY KEY AUTOINCREMENT,
+  input_url TEXT NOT NULL,
+  aweme_id TEXT,
+  title TEXT,
+  author TEXT,
+  status TEXT NOT NULL DEFAULT 'queued',
+  stage TEXT NOT NULL DEFAULT 'queued',
+  progress INTEGER NOT NULL DEFAULT 0,
+  message TEXT,
+  via TEXT,
+  duration_seconds INTEGER,
+  chars INTEGER NOT NULL DEFAULT 0,
+  content TEXT,
+  article_id INTEGER,
+  job_id INTEGER,
+  steps TEXT DEFAULT '[]',
+  error TEXT,
+  created_at TEXT DEFAULT (datetime('now')),
+  updated_at TEXT DEFAULT (datetime('now'))
+);
 `);
+
+const extractionColumns = db.prepare("PRAGMA table_info(douyin_extractions)").all().map((column) => column.name);
+if (!extractionColumns.includes("job_id")) db.exec("ALTER TABLE douyin_extractions ADD COLUMN job_id INTEGER");
 
 // ---- tiny helpers ---------------------------------------------------------
 

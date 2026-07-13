@@ -1,0 +1,44 @@
+/* The connector stays on the marker row; labels sit below it. */
+.vf-rail li {
+  display: block;
+  min-width: 0;
+  text-align: center;
+}
+
+.vf-rail li > button {
+  align-items: center;
+  flex-direction: column;
+  gap: 7px;
+  padding: 0 6px 7px;
+  text-align: center;
+}
+
+.vf-rail li > button > div {
+  width: 100%;
+  padding: 0;
+  background: transparent;
+}
+
+.vf-rail li > button > div > span {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.vf-rail li:not(:last-child)::after {
+  top: 13px;
+  left: calc(50% + 14px);
+  right: calc(-50% + 14px);
+  width: auto;
+}
+
+.vf-rail b {
+  box-shadow: 0 0 0 5px #f9f3e8;
+}
+
+@media (max-width: 900px) {
+  .vf-rail li {
+    min-width: 126px;
+  }
+}

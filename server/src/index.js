@@ -6,10 +6,11 @@ import { api } from "./routes.js";
 import { startPipelineWorker } from "./workers/pipeline.js";
 import { startDiscoveryWorker } from "./workers/discovery.js";
 import { stopAllDevServers } from "./devServers.js";
+import { startExtractionWorker } from "./workers/extractions.js";
 
 const app = express();
 // 30mb: voice-clone samples (≤20MB per MiniMax) travel as base64 JSON.
-app.use(express.json({ limit: "30mb" }));
+app.use(express.json({ limit: "250mb" }));
 app.use("/api", api);
 
 // Serve the built dashboard in production; in dev, Vite proxies /api here.
@@ -25,6 +26,7 @@ app.listen(config.port, () => {
 
 startPipelineWorker();
 startDiscoveryWorker();
+startExtractionWorker();
 
 for (const sig of ["SIGINT", "SIGTERM"]) {
   process.on(sig, () => {

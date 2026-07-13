@@ -1,9 +1,10 @@
 import { spawn } from "node:child_process";
-import { copyFileSync, existsSync, mkdirSync, readFileSync } from "node:fs";
+import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { logEvent } from "./db.js";
 import { runAgent } from "./agentRunner.js";
+import { health as heygemHealth, submitJob, taskStatus, downloadResult } from "./heygem.js";
 
 /**
  * Pipeline definition. Each stage is either:
@@ -19,6 +20,7 @@ export const STAGES = [
   { id: "gate_chapters", kind: "gate", label: "章节验收（可反馈调试）" },
   { id: "audio_synth", kind: "work", label: "音频合成" },
   { id: "subtitle_cues", kind: "work", label: "精确字幕" },
+  { id: "avatar_gen", kind: "work", label: "数字人对口型" },
   { id: "render", kind: "work", label: "成片指引" },
   { id: "done", kind: "gate", label: "完成" },
 ];
@@ -48,6 +50,28 @@ function sh(cmd, args, cwd, jobId, stage) {
   });
 }
 
+function mediaDuration(path) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=nw=1:nk=1", path], { shell: false });
+    let output = "";
+    child.stdout.on("data", (data) => { output += data; });
+    child.on("close", (code) => code === 0 ? resolve(Number(output.trim())) : reject(new Error(`ffprobe failed: ${path}`)));
+  });
+}
+
+function avatarProgress(jobId, percent, message) {
+  logEvent(jobId, "avatar_gen", `progress|${Math.max(0, Math.min(100, Math.round(percent)))}|${message}`);
+}
+
+function bashPath(value) {
+  const normalized = value.replace(/\\/g, "/");
+  return normalized.replace(/^([A-Za-z]):\//, (_match, drive) => `/mnt/${drive.toLowerCase()}/`);
+}
+
+function jobOptions(job) {
+  try { return JSON.parse(job.meta || "{}"); } catch { return {}; }
+}
+
 const runners = {
   /**
    * article.md (written at job creation) -> script.md + outline.md.
@@ -57,6 +81,7 @@ const runners = {
    */
   async script_outline(job) {
     const skill = config.skills.webVideoPresentation;
+    const theme = jobOptions(job).theme || config.theme;
     const prompt = [
       `你在一个视频生成流水线的无人值守环节中工作，当前目录是一个视频项目工作区。`,
       `输入文章在 ./article.md。`,
@@ -64,7 +89,7 @@ const runners = {
       `（必读其中引用的 references/SCRIPT-STYLE.md 与 references/OUTLINE-FORMAT.md）`,
       ``,
       `任务：产出 ./script.md（口播稿）和 ./outline.md（开发计划）。`,
-      `outline.md 顶部主题字段直接写 \`${config.theme}\`。`,
+      `outline.md 顶部主题字段直接写 \`${theme}\`。`,
       `两份文件都必须自己走完各自的自检清单并修复所有 FAIL 项后才算完成。`,
       `不要停下来向用户提问——审批在流水线外部完成。做完即退出。`,
     ].join("\n");
@@ -73,10 +98,11 @@ const runners = {
 
   async scaffold(job) {
     const skill = config.skills.webVideoPresentation;
-    const scaffoldSh = `${skill}/scripts/scaffold.sh`.replace(/\\/g, "/");
+    const theme = jobOptions(job).theme || config.theme;
+    const scaffoldSh = bashPath(`${skill}/scripts/scaffold.sh`);
     const r = await sh(
       "bash",
-      [JSON.stringify(scaffoldSh), "./presentation", `--theme=${config.theme}`],
+      [JSON.stringify(scaffoldSh), "./presentation", `--theme=${theme}`],
       job.workspace,
       job.id,
       "scaffold",
@@ -95,10 +121,19 @@ const runners = {
    */
   async chapter_gen(job) {
     const skill = config.skills.webVideoPresentation;
+    const options = jobOptions(job);
+    const theme = options.theme || config.theme;
+    const avatar = options.avatar || {};
+    const avatarPosition = avatar.position === "right-top" ? "右上角小窗" : avatar.position === "right-bottom" ? "右下角小窗" : "右侧约三分之一讲师区";
+    const avatarReserve = avatar.position === "right-third" ? 640 : 360;
+    const avatarLayout = options.avatar?.enabled
+      ? `本片启用讲师数字人：人物位于${avatarPosition}，所有章节正文必须为右侧讲师窗口预留 ${avatarReserve}px，不得把关键文字或图表放入该区域。逐章检查并重新排版所有已经存在的页面，不能只加一个视频浮层。`
+      : "本片暂未启用讲师数字人。";
     const prompt = [
       `你在一个视频生成流水线的无人值守环节中工作。当前目录是一个已完成 Phase 1 的 web-video-presentation 项目：`,
       `- ./article.md ./script.md ./outline.md 已定稿（不要改它们）`,
-      `- ./presentation/ 已用主题 ${config.theme} 脚手架完成，01-example 已删除`,
+      `- ./presentation/ 已用主题 ${theme} 脚手架完成，01-example 已删除`,
+      avatarLayout,
       ``,
       `任务：按 outline.md 把全部章节开发完成。规范（必须照做）：`,
       `- 每章开发前重读 ${skill}/references/CHAPTER-CRAFT.md（单一必读入口）`,
@@ -160,6 +195,95 @@ const runners = {
     return { ok: true };
   },
 
+  async avatar_gen(job) {
+    let meta = {};
+    try { meta = JSON.parse(job.meta || "{}"); } catch {}
+    if (!meta.avatar?.enabled) return { ok: true, note: "本作品未启用数字人" };
+    avatarProgress(job.id, 2, "检查数字人服务和素材");
+    const service = await heygemHealth();
+    if (!service.ok || !service.ready) return { ok: false, note: "HeyGem 服务未启动或模型未就绪，请先在设置中确认数字人服务状态" };
+    if (!meta.avatar.source) return { ok: false, note: "请先从素材库选择一段本人出镜视频" };
+    const source = join(job.workspace, meta.avatar.source);
+    if (!existsSync(source)) return { ok: false, note: "所选数字人视频不存在，请重新从素材库选择" };
+    const presDir = join(job.workspace, "presentation");
+    const audioRoot = join(presDir, "public", "audio");
+    const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+      const p = join(dir, entry.name);
+      return entry.isDirectory() ? walk(p) : entry.name.endsWith(".mp3") ? [p] : [];
+    });
+    const files = walk(audioRoot).sort();
+    if (!files.length) return { ok: false, note: "没有找到配音文件" };
+    avatarProgress(job.id, 6, `整理 ${files.length} 段配音`);
+    const avatarDir = join(presDir, "public", "avatar");
+    mkdirSync(avatarDir, { recursive: true });
+    const concatFile = join(avatarDir, "audio-list.txt");
+    writeFileSync(concatFile, files.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n"));
+    const merged = join(avatarDir, "narration.mp3");
+    const merge = await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-c:a", "libmp3lame", merged], presDir, job.id, "avatar_gen");
+    if (!merge.ok) return merge;
+    avatarProgress(job.id, 12, "配音合并完成，正在上传模型");
+    const submitted = await submitJob({
+      audioB64: readFileSync(merged).toString("base64"),
+      videoB64: readFileSync(source).toString("base64"),
+      videoFmt: source.toLowerCase().endsWith(".mov") ? "mov" : "mp4",
+    });
+    avatarProgress(job.id, 18, "HeyGem 已接收任务，开始口型推理");
+    let lastProgress = -1;
+    for (let i = 0; i < 360; i += 1) {
+      const state = await taskStatus(submitted.taskId);
+      const progress = Number(state.progress ?? 0);
+      if (progress >= lastProgress + 5) {
+        lastProgress = progress;
+        avatarProgress(job.id, 18 + progress * 0.68, `模型推理 ${Math.min(100, Math.round(progress))}%`);
+      }
+      if (state.status === "done") {
+        avatarProgress(job.id, 88, "模型完成，正在下载数字人视频");
+        const lipsync = join(avatarDir, "lipsync.mp4");
+        writeFileSync(lipsync, await downloadResult(submitted.taskId));
+        avatarProgress(job.id, 91, "正在按章节切分预览视频");
+        const chapterDir = join(avatarDir, "chapters");
+        mkdirSync(chapterDir, { recursive: true });
+        const groups = new Map();
+        for (const file of files) {
+          const chapter = file.replace(/\\/g, "/").split("/").slice(-2, -1)[0];
+          if (!groups.has(chapter)) groups.set(chapter, []);
+          groups.get(chapter).push(file);
+        }
+        let cursor = 0;
+        let chapterIndex = 0;
+        for (const [chapter, chapterFiles] of groups) {
+          let duration = 0;
+          for (const file of chapterFiles) duration += await mediaDuration(file);
+          const output = join(chapterDir, `${chapter}.mp4`);
+          const cut = await sh("ffmpeg", ["-y", "-ss", cursor.toFixed(3), "-i", lipsync, "-t", duration.toFixed(3), "-c:v", "libx264", "-preset", "veryfast", "-an", output], presDir, job.id, "avatar_gen");
+          if (!cut.ok) return cut;
+          cursor += duration;
+          chapterIndex += 1;
+          avatarProgress(job.id, 91 + (chapterIndex / groups.size) * 4, `已生成章节预览 ${chapterIndex}/${groups.size}`);
+        }
+        const skill = config.skills.videoAvatarSubtitles;
+        const position = meta.avatar.position === "right-top" ? "右上角小窗" : meta.avatar.position === "right-bottom" ? "右下角小窗" : "右侧约三分之一讲师区";
+        const reserve = meta.avatar.position === "right-third" ? 640 : 360;
+        const prompt = [
+          `当前目录是已完成配音与字幕的网页演示，public/avatar/lipsync.mp4 是刚生成的全片数字人对口型视频。`,
+          `严格按照 ${skill}/references/AVATAR-PIPELINE.md 接入讲师窗口：`,
+          `- 本作品选择的位置是${position}，右侧预留宽度是 ${reserve}px；人物窗口 right 40px、圆角 28px`,
+          `- 所有 PPT 正文永久为右侧预留 ${reserve}px，逐页重排，关键文字、图表不得进入这一区域`,
+          `- video 必须 muted、playsInline，由当前音频时间轴驱动，不得让它自由播放`,
+          `- 跟随每个 step 的真实累计音频位置同步，切换 step 时不得从视频开头重播`,
+          `- 完成后运行 npx tsc --noEmit，修复全部错误后退出。`,
+        ].join("\n");
+        avatarProgress(job.id, 96, "正在把数字人接入每一页画面");
+        const wired = await runAgent({ jobId: job.id, stage: "avatar_gen", cwd: presDir, prompt });
+        if (wired.ok) avatarProgress(job.id, 100, "数字人生成和章节预览已完成");
+        return wired.ok ? { ok: true, note: "数字人对口型视频已生成并接入右侧讲师区" } : wired;
+      }
+      if (state.status === "error") return { ok: false, note: state.error || "数字人生成失败" };
+      await new Promise((resolve) => setTimeout(resolve, 5000));
+    }
+    return { ok: false, note: "数字人生成超时，可直接重试本环节" };
+  },
+
   /**
    * v1 keeps recording manual (most reliable): write instructions. A later
    * version can drive Playwright + ffmpeg here.
@@ -185,15 +309,24 @@ export async function runStage(job) {
 }
 
 /** Feedback -> scoped debug agent run against one chapter (or global). */
-export async function runFeedback(job, { chapter, message }) {
+export async function runFeedback(job, { chapter, message, phase }) {
   const skill = config.skills.webVideoPresentation;
-  const scopeLine = chapter
-    ? `本次只允许修改 presentation/src/chapters/${chapter}/ 内的文件（如结构变化才允许动 chapters.ts / useStepper.ts 的 STORAGE_KEY）。`
-    : `根据反馈判断涉及哪些文件，改动范围尽量小。`;
+  const scopeLine = phase === "文案确认"
+    ? `当前查看“文案确认”：只允许修改 article.md，不得修改其他文件。`
+    : phase === "口播稿审阅"
+      ? `当前查看“口播稿审阅”：只允许修改 script.md；若章节标题变化，可同步 outline.md 的对应标题。不得修改 presentation。`
+      : phase === "选择风格"
+        ? `当前查看“选择风格”：只解释可执行的风格调整，不修改稿件；具体主题和数字人占位由界面控件保存。`
+        : chapter
+          ? `本次只允许修改 presentation/src/chapters/${chapter}/ 内的文件（如结构变化才允许动 chapters.ts / useStepper.ts 的 STORAGE_KEY）。`
+          : `当前查看“${phase || "画面"}”：只允许修改 presentation 内与反馈直接相关的文件，改动范围尽量小。`;
   const prompt = [
-    `当前目录是一个 web-video-presentation 项目，用户对当前成品提出了修改反馈。`,
+    `当前目录是一个 VideoForge 作品工作区，用户正在“${phase || "画面调试"}”环节提出修改反馈。`,
     `用户反馈：${message}`,
     scopeLine,
+    `严格执行最小改动：用户只要求样式时，禁止修改任何可见文案、narrations.ts、step 数和组件结构；用户只要求文案时，禁止改布局和样式。`,
+    `如果作品启用了数字人，右侧讲师安全区必须保持为空，不得加入卡片、摘要、图表或装饰内容；只能放数字人视频或低对比度的占位提示。`,
+    `修改前后必须自行检查 git diff（即使项目未纳入 git，也要逐文件核对），发现超出用户要求的改动必须撤回。`,
     `修改时遵守 ${skill}/references/CHAPTER-CRAFT.md 的规范（主题 token / 字号 ≥20px / 反AI味）。`,
     `完成后 npx tsc --noEmit 必须 0 错误。不要向用户提问，做完即退出。`,
   ].join("\n");

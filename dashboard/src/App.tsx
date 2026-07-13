@@ -1,14 +1,16 @@
 import { useEffect, useState } from "react";
 import { api, type StageDef } from "./api";
 import { Articles } from "./pages/Articles";
-import { Jobs } from "./pages/Jobs";
-import { JobDetail } from "./pages/JobDetail";
 import { Settings } from "./pages/Settings";
+import { NewWork } from "./pages/NewWork";
+import { Works } from "./pages/Works";
+import { Workbench } from "./pages/Workbench";
+import { Assets } from "./pages/Assets";
 
-type Tab = "articles" | "jobs" | "settings";
+type Tab = "works" | "new" | "assets" | "settings";
 
 export default function App() {
-  const [tab, setTab] = useState<Tab>("articles");
+  const [tab, setTab] = useState<Tab>("works");
   const [openJob, setOpenJob] = useState<number | null>(null);
   const [stages, setStages] = useState<StageDef[]>([]);
 
@@ -17,55 +19,9 @@ export default function App() {
   }, []);
 
   return (
-    <div>
-      <div className="topbar">
-        <h1>
-          Video<span>Forge</span>
-        </h1>
-        <div className="tabs">
-          <button
-            className={tab === "articles" && openJob === null ? "active" : ""}
-            onClick={() => {
-              setTab("articles");
-              setOpenJob(null);
-            }}
-          >
-            选题
-          </button>
-          <button
-            className={tab === "jobs" || openJob !== null ? "active" : ""}
-            onClick={() => {
-              setTab("jobs");
-              setOpenJob(null);
-            }}
-          >
-            任务
-          </button>
-          <button
-            className={tab === "settings" && openJob === null ? "active" : ""}
-            onClick={() => {
-              setTab("settings");
-              setOpenJob(null);
-            }}
-          >
-            设置
-          </button>
-        </div>
-      </div>
-
-      {openJob !== null ? (
-        <JobDetail jobId={openJob} stages={stages} onBack={() => setOpenJob(null)} />
-      ) : tab === "articles" ? (
-        <Articles
-          onJobCreated={(id) => {
-            setOpenJob(id);
-          }}
-        />
-      ) : tab === "jobs" ? (
-        <Jobs stages={stages} onOpen={setOpenJob} />
-      ) : (
-        <Settings />
-      )}
+    <div className="vf-shell">
+      <header className="vf-topbar"><button className="vf-brand" onClick={() => { setTab("works"); setOpenJob(null); }}><b>VF</b><span>VideoForge</span></button><nav><button className={tab === "works" && openJob === null ? "active" : ""} onClick={() => { setTab("works"); setOpenJob(null); }}>作品</button><button className={tab === "new" ? "active" : ""} onClick={() => { setTab("new"); setOpenJob(null); }}>新建</button><button className={tab === "assets" ? "active" : ""} onClick={() => { setTab("assets"); setOpenJob(null); }}>素材库</button><button className={tab === "settings" ? "active" : ""} onClick={() => { setTab("settings"); setOpenJob(null); }}>设置</button></nav><div className="vf-topbar-end"><span className="vf-online" />本机工作台</div></header>
+      {openJob !== null ? <Workbench jobId={openJob} onBack={() => { setOpenJob(null); setTab("works"); }} /> : tab === "works" ? <Works onOpen={setOpenJob} onCreate={() => setTab("new")} /> : tab === "new" ? <NewWork onCreated={setOpenJob} /> : tab === "assets" ? <Assets /> : tab === "settings" ? <main className="vf-page"><section className="vf-page-head"><div><p className="vf-kicker">后台设置</p><h2>声音与模型统一配置</h2><p>所有密钥只保存在这台电脑上。</p></div></section><Settings /></main> : <Articles onJobCreated={setOpenJob} />}
     </div>
   );
 }

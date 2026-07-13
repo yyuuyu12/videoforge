@@ -88,48 +88,46 @@ function LlmCard({ s, onSaved }: { s: SettingsData; onSaved: (s: SettingsData) =
   };
 
   return (
-    <div className="card">
+    <div className="card vf-settings-card">
       <h3>模型供应商（生成文案/章节用）</h3>
-      <div className="row" style={{ gap: 12, marginBottom: 8 }}>
-        <label>
+      <div className="vf-settings-modes">
+        <label className="vf-radio-option">
           <input type="radio" checked={mode === "subscription"} onChange={() => setMode("subscription")} />
           订阅模式（本机 claude 登录，无需 key）
         </label>
-        <label>
+        <label className="vf-radio-option">
           <input type="radio" checked={mode === "api"} onChange={() => setMode("api")} />
           API 模式（自己的 key）
         </label>
       </div>
       {mode === "api" && (
         <>
-          <div className="row" style={{ marginBottom: 8 }}>
+          <div className="vf-settings-grid">
             <select value={provider} onChange={(e) => setProvider(e.target.value as typeof provider)}>
               <option value="anthropic">Anthropic（Claude API）</option>
               <option value="openai-compatible">OpenAI 兼容（DeepSeek/Kimi/GLM…）</option>
             </select>
             <input
-              placeholder="模型名，如 claude-sonnet-5 / deepseek-chat"
-              style={{ flex: 1 }}
+              placeholder="模型名，如 gpt-5.5 / claude-sonnet-5"
               value={model}
               onChange={(e) => setModel(e.target.value)}
             />
           </div>
           {provider === "openai-compatible" && (
-            <div className="row" style={{ marginBottom: 8 }}>
+            <div className="vf-settings-field">
               <input
                 placeholder="Base URL，如 https://api.deepseek.com/v1"
-                style={{ flex: 1 }}
                 value={baseUrl}
                 onChange={(e) => setBaseUrl(e.target.value)}
               />
             </div>
           )}
-          <div className="row" style={{ marginBottom: 8 }}>
+          <div className="vf-settings-field">
             <KeyInput placeholder="API key（只存本机，不上传）" hint={s.llm.apiKeyState} value={apiKey} onChange={setApiKey} />
           </div>
         </>
       )}
-      <div className="row">
+      <div className="vf-settings-actions">
         <button className="primary" disabled={busy} onClick={save}>
           保存
         </button>

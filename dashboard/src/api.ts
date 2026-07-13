@@ -32,6 +32,7 @@ export interface Job {
   status: "queued" | "running" | "waiting_approval" | "failed" | "done";
   created_at: string;
   updated_at: string;
+  excerpt?: string | null;
 }
 
 export interface JobEvent {
@@ -51,6 +52,7 @@ export interface Feedback {
 }
 
 export interface JobDetail extends Job {
+  meta: string;
   events: JobEvent[];
   feedback: Feedback[];
   devServer: { running: boolean; port?: number; url?: string };
@@ -86,6 +88,9 @@ export interface Settings {
   };
   asr: {
     baseUrl: string;
+    openAiBaseUrl?: string;
+    model?: string;
+    apiKeyState?: KeyState;
   };
   search: {
     directions: string;
@@ -99,6 +104,42 @@ export interface TestResult {
   mode?: string;
   ready?: boolean;
   ms?: number;
+}
+
+export interface AvatarAsset {
+  id: string;
+  filename: string;
+  name: string;
+  size: number;
+  url: string;
+}
+
+export interface AvatarPreview {
+  id: string;
+  name: string;
+  url: string;
+}
+
+export interface DouyinExtraction {
+  id: number;
+  input_url: string;
+  aweme_id: string | null;
+  title: string | null;
+  author: string | null;
+  status: "queued" | "running" | "done" | "failed";
+  stage: string;
+  progress: number;
+  message: string | null;
+  via: string | null;
+  duration_seconds: number | null;
+  chars: number;
+  content: string | null;
+  article_id: number | null;
+  job_id: number | null;
+  error: string | null;
+  created_at: string;
+  updated_at: string;
+  steps: Array<{ id: string; ok: boolean; warning?: boolean; message: string }>;
 }
 
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
@@ -120,51 +161,147 @@ export const api = {
     req("/sources", { method: "POST", body: JSON.stringify({ name, url }) }),
   removeSource: (id: number) => req(`/sources/${id}`, { method: "DELETE" }),
   runDiscovery: () =>
-    req<{ added: number; sources: number; errors: string[] }>("/discovery/run", { method: "POST" }),
+    req<{ added: number; sources: number; errors: string[] }>(
+      "/discovery/run",
+      { method: "POST" },
+    ),
   articles: (status = "new") => req<Article[]>(`/articles?status=${status}`),
-  addManualArticle: (payload: { url?: string; title?: string; text?: string }) =>
+  addManualArticle: (payload: {
+    url?: string;
+    title?: string;
+    text?: string;
+  }) =>
     req("/articles/manual", { method: "POST", body: JSON.stringify(payload) }),
-  dismissArticle: (id: number) => req(`/articles/${id}/dismiss`, { method: "POST" }),
+  dismissArticle: (id: number) =>
+    req(`/articles/${id}/dismiss`, { method: "POST" }),
   selectArticle: (id: number) =>
     req<{ jobId: number }>(`/articles/${id}/select`, { method: "POST" }),
   jobs: () => req<Job[]>("/jobs"),
   job: (id: number) => req<JobDetail>(`/jobs/${id}`),
   approve: (id: number) => req(`/jobs/${id}/approve`, { method: "POST" }),
   retry: (id: number, stage?: string) =>
-    req(`/jobs/${id}/retry`, { method: "POST", body: JSON.stringify({ stage }) }),
-  sendFeedback: (id: number, chapter: string | null, message: string) =>
-    req(`/jobs/${id}/feedback`, { method: "POST", body: JSON.stringify({ chapter, message }) }),
+    req(`/jobs/${id}/retry`, {
+      method: "POST",
+      body: JSON.stringify({ stage }),
+    }),
+  sendFeedback: (
+    id: number,
+    chapter: string | null,
+    message: string,
+    phase?: string,
+  ) =>
+    req(`/jobs/${id}/feedback`, {
+      method: "POST",
+      body: JSON.stringify({ chapter, message, phase }),
+    }),
+  jobFile: (id: number, name: string) =>
+    req<{ ok: boolean; name: string; content: string | null }>(
+      `/jobs/${id}/files/${name}`,
+    ),
   devStart: (id: number) =>
-    req<{ running: boolean; url?: string }>(`/jobs/${id}/devserver/start`, { method: "POST" }),
-  devStop: (id: number) => req(`/jobs/${id}/devserver/stop`, { method: "POST" }),
+    req<{ running: boolean; url?: string }>(`/jobs/${id}/devserver/start`, {
+      method: "POST",
+    }),
+  devStop: (id: number) =>
+    req(`/jobs/${id}/devserver/stop`, { method: "POST" }),
+  saveJobOptions: (id: number, patch: unknown) =>
+    req<JobDetail>(`/jobs/${id}/options`, {
+      method: "PUT",
+      body: JSON.stringify(patch),
+    }),
+  uploadAvatar: (
+    id: number,
+    payload: { filename: string; dataBase64: string },
+  ) =>
+    req<{ ok: boolean; filename: string }>(`/jobs/${id}/avatar`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  generateAvatar: (id: number) =>
+    req(`/jobs/${id}/avatar/generate`, { method: "POST" }),
+  avatarAssets: () => req<AvatarAsset[]>("/assets/avatars"),
+  uploadAvatarAsset: (payload: { filename: string; dataBase64: string }) =>
+    req<AvatarAsset>("/assets/avatars", {
+      method: "POST",
+      body: JSON.stringify(payload),
+    }),
+  deleteAvatarAsset: (id: string) =>
+    req(`/assets/avatars/${id}`, { method: "DELETE" }),
+  selectAvatarAsset: (jobId: number, assetId: string) =>
+    req(`/jobs/${jobId}/avatar/select`, {
+      method: "POST",
+      body: JSON.stringify({ assetId }),
+    }),
+  avatarPreviews: (jobId: number) =>
+    req<AvatarPreview[]>(`/jobs/${jobId}/avatar/previews`),
 
   // settings / providers / voice / heygem — M1
   settings: () => req<Settings>("/settings"),
   saveSettings: (patch: unknown) =>
     req<Settings>("/settings", { method: "PUT", body: JSON.stringify(patch) }),
   testLlm: () => req<TestResult>("/settings/test-llm", { method: "POST" }),
-  testMinimax: () => req<TestResult>("/settings/test-minimax", { method: "POST" }),
-  voicePreview: (payload: { text?: string; speed?: number; emotion?: string; voiceId?: string }) =>
-    req<{ ok: boolean; audioBase64?: string; error?: string }>("/voice/preview", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
-  voiceClone: (payload: { filename: string; dataBase64: string; voiceId: string }) =>
-    req<{ ok: boolean; voiceId?: string; demoBase64?: string; error?: string }>("/voice/clone", {
-      method: "POST",
-      body: JSON.stringify(payload),
-    }),
+  testMinimax: () =>
+    req<TestResult>("/settings/test-minimax", { method: "POST" }),
+  voicePreview: (payload: {
+    text?: string;
+    speed?: number;
+    emotion?: string;
+    voiceId?: string;
+  }) =>
+    req<{ ok: boolean; audioBase64?: string; error?: string }>(
+      "/voice/preview",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
+  voiceClone: (payload: {
+    filename: string;
+    dataBase64: string;
+    voiceId: string;
+  }) =>
+    req<{ ok: boolean; voiceId?: string; demoBase64?: string; error?: string }>(
+      "/voice/clone",
+      {
+        method: "POST",
+        body: JSON.stringify(payload),
+      },
+    ),
   heygemHealth: () => req<TestResult>("/heygem/health"),
 
   // content sources — M1
   searchTopics: (directions: string) =>
-    req<{ ok: boolean; found?: number; added?: number; error?: string }>("/discovery/search", {
-      method: "POST",
-      body: JSON.stringify({ directions }),
-    }),
-  douyinExtract: (url: string) =>
-    req<{ ok: boolean; added?: boolean; via?: string; chars?: number; title?: string; error?: string }>(
-      "/articles/douyin",
-      { method: "POST", body: JSON.stringify({ url }) },
+    req<{ ok: boolean; found?: number; added?: number; error?: string }>(
+      "/discovery/search",
+      {
+        method: "POST",
+        body: JSON.stringify({ directions }),
+      },
     ),
+  douyinExtract: (url: string) =>
+    req<{
+      ok: boolean;
+      added?: boolean;
+      articleId?: number;
+      via?: string;
+      chars?: number;
+      title?: string;
+      steps?: Array<{
+        id: string;
+        ok: boolean;
+        warning?: boolean;
+        message: string;
+      }>;
+      error?: string;
+    }>("/articles/douyin", { method: "POST", body: JSON.stringify({ url }) }),
+  douyinExtractions: () => req<DouyinExtraction[]>("/douyin/extractions"),
+  createDouyinExtraction: (url: string) =>
+    req<{ id: number; status: string }>("/douyin/extractions", {
+      method: "POST",
+      body: JSON.stringify({ url }),
+    }),
+  retryDouyinExtraction: (id: number) =>
+    req(`/douyin/extractions/${id}/retry`, { method: "POST" }),
+  createWorkFromExtraction: (id: number) =>
+    req<{ jobId: number; existing?: boolean }>(`/douyin/extractions/${id}/create-work`, { method: "POST" }),
 };

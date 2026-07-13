@@ -1,52 +1,44 @@
 # VideoForge
 
-把「文章 → 讲解视频」流水线产品化的单机控制台。底层复用两个已验证的 Claude Code Skill：
+VideoForge 是一套本机运行的文章/抖音文案到讲解视频工作台。它把文案生成、网页演示、配音字幕、数字人口型和分章节预览组织成可回看、可重试的流水线。
 
-- `web-video-presentation` — 文章 → 口播稿/outline → 网页演示（Vite+React）→ TTS 音频
-- `video-avatar-subtitles` — 逐字时间戳精确字幕（+ 可选对口型头像，v1 未接入流水线）
+## 快速启动
 
-## 形态与前提
+环境要求：Node.js 22+、npm、Git Bash、ffmpeg。数字人和抖音长视频转录还需要本机 HeyGem 与 Whisper 服务。
 
-**个人工具形态**：生成环节跑的是本机 headless Claude Code（`claude -p`），走你已登录的订阅，
-不需要 Anthropic API key。前提：
-
-- 本机 `claude` 命令可用且已登录
-- 两个 Skill 已安装在 `~/.claude/skills/`（路径可在 config.json 改）
-- Git Bash 可用（脚手架脚本用 bash）
-- TTS 需要 MiniMax key：启动 server 的终端里先 `set MINIMAX_API_KEY=sk-api-...`
-
-## 运行
-
-```bash
-npm install          # 一次，装 server + dashboard
-npm run server       # 终端 1 → http://localhost:5401 (API)
-npm run dashboard    # 终端 2 → http://localhost:5400 (控制台，代理 /api)
+```powershell
+npm install
+npm run build
+npm start
 ```
 
-生产模式：`npm run build` 后只跑 `npm start`（server 直接伺服打包好的控制台）。
+打开 <http://localhost:5401>。开发时可分别运行：
 
-配置：复制 `config.example.json` 为 `config.json` 按需改（主题、skill 路径、TTS 音色、并发数）。
-
-## 流水线
-
-```
-选题(RSS 定时抓取/手动 URL) → 做成视频(建 Job + workspace/article.md)
-  → script_outline   agent 产出口播稿+outline（自检后落盘）
-  → [稿件审批门]      控制台里看 workspace 下的 script.md/outline.md，点通过
-  → scaffold         bash 脚手架（主题固定 config.theme）
-  → chapter_gen      agent 按 outline 建全部章节 + tsc + 自检
-  → [章节验收门]      启动预览 iframe 看片；反馈框把修改意见发给 scoped agent，改完刷新再看；满意点通过
-  → audio_synth      MiniMax 合成（增量、限流、带逐字时间戳）
-  → subtitle_cues    时间戳→字幕 cues + agent 接线 Subtitle 组件
-  → render           输出录屏指引（?auto=1 一镜到底）；后续版本接 Playwright 自动录制
+```powershell
+npm run server
+npm run dashboard
 ```
 
-失败的阶段在任务详情页一键重试；server 重启后 running 状态的任务自动回队列续跑
-（真相全在 workspace 文件系统里，阶段幂等）。
+Dashboard 开发地址为 `http://localhost:5400`，API 为 `http://localhost:5401`。
 
-## 已知边界（v1）
+## 核心流程
 
-- 成片录制是手动的（页面 `?auto=1` + OS 录屏）——最可靠；自动化录制（Playwright+ffmpeg）留给 v2
-- 对口型头像未进流水线（需要 HeyGem 本地服务 + 素材），要做时对着 `video-avatar-subtitles` skill 的 AVATAR-PIPELINE.md 加一个 stage 即可
-- 文章正文抽取是朴素的 HTML 去标签，微信公众号一类反爬站点建议手动贴正文
-- 订阅额度就是吞吐上限：agent 并发默认 1，撞限时任务会失败，等窗口重置后重试
+1. 从文章链接、直接文本或抖音分享链接创建内容。
+2. 抖音长视频在后台提取，保存百分比、历史记录和完整转录；完成后由用户决定是否制作。
+3. 生成并人工确认口播稿。
+4. 选择画面主题与数字人占位。
+5. 生成逐页网页演示并预览、对话微调。
+6. MiniMax 生成配音与逐字字幕。
+7. HeyGem 生成数字人口型，并拆分为章节预览。
+8. 在数字人或导出环节检查完整音画。
+
+详细架构与启动方式见 [CURRENT-ARCHITECTURE.md](CURRENT-ARCHITECTURE.md) 和 [OPERATIONS.md](OPERATIONS.md)。长期技术决策见 [PROJECT-MEMORY.md](PROJECT-MEMORY.md)。
+
+## 数据与密钥
+
+- `settings.local.json`：本机密钥，Git 忽略，接口只返回掩码。
+- `data.db`：本机任务状态与历史，Git 忽略。
+- `workspaces/`：作品源码、音频、字幕、数字人和预览，Git 忽略。
+- `workspaces/_assets/avatars/`：本地数字人素材库。
+
+不得把 API key、用户素材、数据库或生成视频提交到仓库。

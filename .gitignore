@@ -5,3 +5,5 @@ config.json
 data.db
 workspaces/
 *.log
+.playwright-cli/
+*.tsbuildinfo

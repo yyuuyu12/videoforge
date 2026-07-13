@@ -85,7 +85,9 @@ export function approveGate(jobId) {
 export function retryJob(jobId, stage) {
   const job = getJob(jobId);
   if (!job) return false;
+  const targetStage = stage ?? job.stage;
+  if (["queued", "running"].includes(job.status) && targetStage === job.stage) return true;
   updateJob(jobId, { ...(stage ? { stage } : {}), status: "queued" });
-  logEvent(jobId, stage ?? job.stage, "手动重试");
+  logEvent(jobId, targetStage, "手动重试");
   return true;
 }
