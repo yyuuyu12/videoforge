@@ -79,12 +79,23 @@ export interface ChapterGeneration {
   chapters: ChapterReview[];
 }
 
+export interface RenderOutput {
+  exists: boolean;
+  rendering: boolean;
+  durationSec?: number;
+  segmentsPlaced?: number;
+  segmentsExpected?: number;
+  frames?: number;
+  renderedAt?: string;
+}
+
 export interface JobDetail extends Job {
   meta: string;
   events: JobEvent[];
   feedback: Feedback[];
   chapterGeneration: ChapterGeneration;
   devServer: { running: boolean; port?: number; url?: string };
+  output?: RenderOutput;
 }
 
 export interface KeyState {
@@ -273,6 +284,10 @@ export const api = {
     req(`/jobs/${id}/retry`, {
       method: "POST",
       body: JSON.stringify({ stage }),
+    }),
+  startRender: (id: number) =>
+    req<{ ok: boolean; started: boolean }>(`/jobs/${id}/render`, {
+      method: "POST",
     }),
   sendFeedback: (
     id: number,

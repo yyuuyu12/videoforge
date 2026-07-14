@@ -7,6 +7,7 @@ import { fetchArticleText, runDiscovery } from "./workers/discovery.js";
 import { approveGate, retryJob } from "./workers/pipeline.js";
 import { runFeedback, STAGES } from "./stages.js";
 import { devServerStatus, startDevServer, stopDevServer } from "./devServers.js";
+import { renderJob } from "./render.js";
 import { publicSettings, saveSettings } from "./settings.js";
 import { testLlmConnection } from "./providers.js";
 import { cloneVoice, synthesize, testKey } from "./minimax.js";
@@ -569,7 +570,12 @@ api.get("/jobs/:id", (req, res) => {
   const feedback = db
     .prepare("SELECT * FROM feedback WHERE job_id = ? ORDER BY id DESC LIMIT 50")
     .all(job.id);
-  res.json({ ...job, events, feedback, chapterGeneration: chapterGeneration(job), devServer: devServerStatus(job.id) });
+  const outputPath = join(job.workspace, "output.mp4");
+  let output = { exists: existsSync(outputPath), rendering: renderingJobs.has(job.id) };
+  if (output.exists) {
+    try { output = { ...JSON.parse(readFileSync(join(job.workspace, "render-meta.json"), "utf8")), ...output }; } catch {}
+  }
+  res.json({ ...job, events, feedback, output, chapterGeneration: chapterGeneration(job), devServer: devServerStatus(job.id) });
 });
 
 api.put("/jobs/:id/options", (req, res) => {
@@ -777,4 +783,28 @@ api.post("/jobs/:id/devserver/start", async (req, res) => {
 
 api.post("/jobs/:id/devserver/stop", (req, res) => {
   res.json(stopDevServer(Number(req.params.id)));
+});
+
+// ---- 服务端成片（无头浏览器 + ffmpeg） ------------------------------------------
+
+const renderingJobs = new Set();
+
+api.post("/jobs/:id/render", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  if (renderingJobs.has(job.id)) return res.status(409).json({ error: "本作品正在渲染中" });
+  renderingJobs.add(job.id);
+  res.json({ ok: true, started: true }); // 立即返回；进度走 render 阶段的 job_events
+  renderJob(job)
+    .then((r) => logEvent(job.id, "render", r.note))
+    .catch((err) => logEvent(job.id, "render", `服务端渲染失败：${err.message}`, "error"))
+    .finally(() => renderingJobs.delete(job.id));
+});
+
+api.get("/jobs/:id/output", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  const output = join(job.workspace, "output.mp4");
+  if (!existsSync(output)) return res.status(404).json({ error: "尚未生成成片" });
+  res.download(output, `videoforge-${job.id}.mp4`);
 });

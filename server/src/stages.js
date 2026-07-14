@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { db, logEvent, recordUsage } from "./db.js";
 import { runAgent } from "./agentRunner.js";
+import { renderJob } from "./render.js";
 import { health as heygemHealth, submitJob, taskStatus, downloadResult } from "./heygem.js";
 
 /**
@@ -22,7 +23,7 @@ export const STAGES = [
   { id: "audio_synth", kind: "work", label: "音频合成" },
   { id: "subtitle_cues", kind: "work", label: "精确字幕" },
   { id: "avatar_gen", kind: "work", label: "数字人对口型" },
-  { id: "render", kind: "work", label: "成片指引" },
+  { id: "render", kind: "work", label: "成片渲染" },
   { id: "done", kind: "gate", label: "完成" },
 ];
 
@@ -407,21 +408,23 @@ const runners = {
     return { ok: false, note: "数字人生成超时，可直接重试本环节" };
   },
 
-  /**
-   * v1 keeps recording manual (most reliable): write instructions. A later
-   * version can drive Playwright + ffmpeg here.
-   */
+  /** 服务端一键成片（无头浏览器 + ffmpeg）；失败时给出手动录制兜底方法。 */
   async render(job) {
     const presDir = join(job.workspace, "presentation");
-    const note = [
-      "录制方法（Auto 模式一镜到底）：",
-      "1. 在 presentation/ 目录 npm run dev（或用面板上的预览按钮起 dev server）",
-      "2. 浏览器全屏打开 http://localhost:<端口>/?auto=1",
-      "3. 先启动系统录屏（Win+G / OBS），再按一次 SPACE，整片自动播完",
-      "4. 停止录制，掐掉头尾即成片。音画在页面内已同步，无需后期对轨。",
-    ].join("\n");
-    logEvent(job.id, "render", note);
-    return { ok: existsSync(presDir), note };
+    if (!existsSync(presDir)) return { ok: false, note: "presentation 尚未生成" };
+    try {
+      return await renderJob(job);
+    } catch (err) {
+      const fallback = [
+        `服务端渲染失败：${err.message}`,
+        "可先用手动录制兜底（Auto 模式一镜到底）：",
+        "1. 用面板预览按钮起 dev server，浏览器全屏打开 http://localhost:<端口>/?auto=1",
+        "2. 启动系统录屏（Win+G / OBS），按一次 SPACE，整片自动播完后停止录制",
+        "修复问题后可在导出环节重试服务端渲染。",
+      ].join("\n");
+      logEvent(job.id, "render", fallback, "error");
+      return { ok: false, note: fallback };
+    }
   },
 };
 

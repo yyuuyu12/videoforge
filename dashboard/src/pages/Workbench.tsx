@@ -240,6 +240,23 @@ export function Workbench({
       setBusy(false);
     }
   };
+  const startRender = async () => {
+    if (busy) return;
+    setBusy(true);
+    setPreviewError("");
+    try {
+      await api.startRender(job.id);
+      await load();
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "渲染启动失败");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const renderProgressEvent = job.events.find(
+    (event) => event.stage === "render" && event.message.startsWith("progress|"),
+  );
+  const renderProgressParts = renderProgressEvent?.message.split("|") ?? [];
   const regenerate = async () => {
     if (busy) return;
     setBusy(true);
@@ -799,6 +816,35 @@ export function Workbench({
     return (
       <>
         <p className="vf-kicker">导出成片</p>
+        <h2>成片文件</h2>
+        {job.output?.rendering ? (
+          <p className="vf-render-status">
+            正在服务端渲染：{renderProgressParts[1] ?? 0}% ·{" "}
+            {renderProgressParts[2] ?? "准备中"}
+          </p>
+        ) : job.output?.exists ? (
+          <div className="vf-stage-actions">
+            <a
+              className="vf-action-link vf-play-action"
+              href={`/api/jobs/${job.id}/output`}
+            >
+              ⬇ 下载成片
+              {job.output.durationSec
+                ? `（${Math.round(job.output.durationSec)} 秒）`
+                : ""}
+            </a>
+            <button disabled={busy} onClick={startRender}>
+              重新渲染
+            </button>
+          </div>
+        ) : (
+          <div className="vf-stage-actions">
+            <button disabled={busy} onClick={startRender}>
+              🎬 生成成片（服务端渲染）
+            </button>
+          </div>
+        )}
+        {previewError && <p className="vf-error">{previewError}</p>}
         <h2>播放与预览</h2>
         <p>
           点击下方按钮会在新窗口启动整片。浏览器为了保护声音播放，会要求你再点一次画面中央的播放按钮。
