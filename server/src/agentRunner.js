@@ -58,90 +58,200 @@ export function ensureWorkspaceTrusted(cwd) {
 }
 
 /**
- * Run a headless agent (claude -p) in a workspace directory, prompt via
- * stdin. Personal-use mode: rides the local Claude Code login, no API key.
- * Concurrency-capped (config.agent.maxConcurrent) so parallel jobs don't
- * trample the subscription rate limit.
+ * Run a headless agent in a workspace directory. Personal-use mode rides the
+ * local Claude Code login（订阅），无需 API key。主路径是 Claude Agent SDK
+ * （官方契约、无信任对话框、权限一等公民）；SDK 不可用/启动失败时回退
+ * `claude -p`。并发受 config.agent.maxConcurrent 限制（订阅限速）。
  *
- * Returns { ok, output } — output is combined stdout tail for logging.
+ * Returns { ok, output } — output is combined text tail for logging.
  */
 export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation }) {
   if (loadSettings().llm.mode === "api") {
     return runApiAgent({ jobId, stage, cwd, prompt, onProgress, usageOperation });
   }
   return new Promise((resolve) => {
-    const task = () => {
+    const task = async () => {
       running++;
-      const trusted = ensureWorkspaceTrusted(cwd);
-      logEvent(jobId, stage, `agent start (cwd=${cwd}, trusted=${trusted})`);
-      reportProgress(jobId, stage, onProgress, 22, "模型已启动，正在分析任务");
-
-      const child = spawn(config.agent.command, config.agent.args, {
-        cwd,
-        shell: true,
-        env: process.env,
-        stdio: ["pipe", "pipe", "pipe"],
-      });
-
-      liveChildren.add(child.pid);
-      let out = "";
-      let err = "";
-      const cap = (s) => (s.length > 20000 ? s.slice(-20000) : s);
-      child.stdout.on("data", (d) => (out = cap(out + d)));
-      child.stderr.on("data", (d) => (err = cap(err + d)));
-
-      const timer = setTimeout(() => {
-        logEvent(jobId, stage, "agent timeout — killing", "error");
-        killTree(child.pid);
-      }, config.agent.timeoutMs);
-      const progressSteps = [
-        [34, "正在定位需要调整的内容"],
-        [48, "正在修改相关文件"],
-        [62, "正在整理修改结果"],
-        [74, "正在执行完整性检查"],
-      ];
-      let progressIndex = 0;
-      const progressTimer = setInterval(() => {
-        const step = progressSteps[Math.min(progressIndex, progressSteps.length - 1)];
-        reportProgress(jobId, stage, onProgress, step[0], step[1]);
-        progressIndex++;
-      }, 6000);
-
-      child.on("close", (code) => {
-        clearTimeout(timer);
-        clearInterval(progressTimer);
-        liveChildren.delete(child.pid);
+      try {
+        resolve(await runSubscriptionAgent({ jobId, stage, cwd, prompt, onProgress, usageOperation }));
+      } catch (error) {
+        resolve({ ok: false, output: "", note: error.message });
+      } finally {
         running--;
         drain();
-        const ok = code === 0;
-        reportProgress(jobId, stage, onProgress, ok ? 88 : 100, ok ? "模型任务完成，正在整理结果" : "模型执行失败，正在整理错误信息");
-        recordUsage({
-          service: "llm",
-          operation: usageOperation || `agent:${stage}`,
-          jobId,
-          status: ok ? "success" : "failed",
-          inputTokens: Math.ceil(String(prompt).length / 2),
-          outputTokens: Math.ceil(String(out).length / 2),
-          estimated: true,
-          detail: "subscription/claude",
-        });
-        logEvent(
-          jobId,
-          stage,
-          ok
-            ? `agent done\n--- tail ---\n${out.slice(-1500)}`
-            : `agent exit ${code}\n--- stderr ---\n${err.slice(-1500)}\n--- stdout ---\n${out.slice(-1500)}`,
-          ok ? "info" : "error",
-        );
-        resolve({ ok, output: out });
-      });
-
-      child.stdin.write(prompt);
-      child.stdin.end();
+      }
     };
-
     if (running < config.agent.maxConcurrent) task();
     else queue.push(task);
+  });
+}
+
+let sdkModule = null;
+let sdkLoadFailed = false;
+async function loadAgentSdk() {
+  if (sdkModule) return sdkModule;
+  if (sdkLoadFailed) return null;
+  try {
+    sdkModule = await import("@anthropic-ai/claude-agent-sdk");
+    return sdkModule;
+  } catch (error) {
+    sdkLoadFailed = true;
+    console.warn(`Agent SDK 不可用（${error.message}）——订阅模式回退 claude -p`);
+    return null;
+  }
+}
+
+async function runSubscriptionAgent(ctx) {
+  const sdk = await loadAgentSdk();
+  if (!sdk) return runCliAgent(ctx);
+  return runSdkAgent(sdk, ctx);
+}
+
+async function runSdkAgent(sdk, ctx) {
+  const { jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation } = ctx;
+  logEvent(jobId, stage, `agent start (sdk, cwd=${cwd})`);
+  reportProgress(jobId, stage, onProgress, 22, "模型已启动，正在分析任务");
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), config.agent.timeoutMs);
+  const started = Date.now();
+  const cap = (s) => (s.length > 20000 ? s.slice(-20000) : s);
+  let out = "";
+  let result = null;
+  let sawMessage = false;
+  try {
+    for await (const message of sdk.query({
+      prompt,
+      options: {
+        cwd,
+        // 与旧 `claude -p --dangerously-skip-permissions` 等价；SDK 没有
+        // 信任对话框概念，不再需要改写 ~/.claude.json 内部字段。
+        permissionMode: "bypassPermissions",
+        // 不加载个人全局/项目配置——产品行为只由仓库内 prompt 决定，可复现。
+        settingSources: [],
+        abortController: controller,
+      },
+    })) {
+      sawMessage = true;
+      if (message.type === "assistant") {
+        const inner = message.message ?? message;
+        const blocks = Array.isArray(inner.content) ? inner.content : [];
+        for (const block of blocks) {
+          if (block.type === "text" && block.text) out = cap(`${out}${block.text}\n`);
+        }
+        const toolNames = blocks.filter((b) => b.type === "tool_use").map((b) => b.name);
+        if (toolNames.length) {
+          reportProgress(jobId, stage, onProgress, Math.min(78, 30 + Math.floor((Date.now() - started) / 20000) * 8), `正在执行：${toolNames.join("、")}`);
+        }
+      } else if (message.type === "result") {
+        result = message;
+      }
+    }
+    const ok = result ? result.subtype === "success" : true;
+    if (!out && typeof result?.result === "string") out = cap(result.result);
+    reportProgress(jobId, stage, onProgress, ok ? 88 : 100, ok ? "模型任务完成，正在整理结果" : "模型执行失败，正在整理错误信息");
+    recordUsage({
+      service: "llm",
+      operation: usageOperation || `agent:${stage}`,
+      jobId,
+      status: ok ? "success" : "failed",
+      inputTokens: result?.usage?.input_tokens ?? Math.ceil(String(prompt).length / 2),
+      outputTokens: result?.usage?.output_tokens ?? Math.ceil(out.length / 2),
+      durationMs: Date.now() - started,
+      estimated: !result?.usage,
+      detail: `subscription/agent-sdk${result?.total_cost_usd != null ? ` $${Number(result.total_cost_usd).toFixed(4)}` : ""}`,
+    });
+    logEvent(
+      jobId,
+      stage,
+      ok
+        ? `agent done (sdk)\n--- tail ---\n${out.slice(-1500)}`
+        : `agent failed (sdk): ${result?.subtype ?? "unknown"}\n--- tail ---\n${out.slice(-1500)}`,
+      ok ? "info" : "error",
+    );
+    return { ok, output: out };
+  } catch (error) {
+    const timedOut = controller.signal.aborted;
+    if (!sawMessage && !timedOut) {
+      // SDK 一条消息都没吐就挂了（如捆绑二进制缺失）——回退 CLI 路径。
+      logEvent(jobId, stage, `SDK 启动失败（${error.message}），回退 claude -p`, "error");
+      return runCliAgent(ctx);
+    }
+    const note = timedOut ? `agent 超时（${Math.round(config.agent.timeoutMs / 60000)} 分钟上限）` : error.message;
+    recordUsage({ service: "llm", operation: usageOperation || `agent:${stage}`, jobId, status: "failed", durationMs: Date.now() - started, detail: `subscription/agent-sdk: ${note}` });
+    logEvent(jobId, stage, `agent failed (sdk): ${note}\n--- tail ---\n${out.slice(-1500)}`, "error");
+    return { ok: false, output: out, note };
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/** 兜底路径：spawn `claude -p`。仅在 Agent SDK 不可用时使用。 */
+function runCliAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation }) {
+  return new Promise((resolve) => {
+    const trusted = ensureWorkspaceTrusted(cwd);
+    logEvent(jobId, stage, `agent start (cli, cwd=${cwd}, trusted=${trusted})`);
+    reportProgress(jobId, stage, onProgress, 22, "模型已启动，正在分析任务");
+
+    const child = spawn(config.agent.command, config.agent.args, {
+      cwd,
+      shell: true,
+      env: process.env,
+      stdio: ["pipe", "pipe", "pipe"],
+    });
+
+    liveChildren.add(child.pid);
+    let out = "";
+    let err = "";
+    const cap = (s) => (s.length > 20000 ? s.slice(-20000) : s);
+    child.stdout.on("data", (d) => (out = cap(out + d)));
+    child.stderr.on("data", (d) => (err = cap(err + d)));
+
+    const timer = setTimeout(() => {
+      logEvent(jobId, stage, "agent timeout — killing", "error");
+      killTree(child.pid);
+    }, config.agent.timeoutMs);
+    const progressSteps = [
+      [34, "正在定位需要调整的内容"],
+      [48, "正在修改相关文件"],
+      [62, "正在整理修改结果"],
+      [74, "正在执行完整性检查"],
+    ];
+    let progressIndex = 0;
+    const progressTimer = setInterval(() => {
+      const step = progressSteps[Math.min(progressIndex, progressSteps.length - 1)];
+      reportProgress(jobId, stage, onProgress, step[0], step[1]);
+      progressIndex++;
+    }, 6000);
+
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      clearInterval(progressTimer);
+      liveChildren.delete(child.pid);
+      const ok = code === 0;
+      reportProgress(jobId, stage, onProgress, ok ? 88 : 100, ok ? "模型任务完成，正在整理结果" : "模型执行失败，正在整理错误信息");
+      recordUsage({
+        service: "llm",
+        operation: usageOperation || `agent:${stage}`,
+        jobId,
+        status: ok ? "success" : "failed",
+        inputTokens: Math.ceil(String(prompt).length / 2),
+        outputTokens: Math.ceil(String(out).length / 2),
+        estimated: true,
+        detail: "subscription/claude-cli",
+      });
+      logEvent(
+        jobId,
+        stage,
+        ok
+          ? `agent done\n--- tail ---\n${out.slice(-1500)}`
+          : `agent exit ${code}\n--- stderr ---\n${err.slice(-1500)}\n--- stdout ---\n${out.slice(-1500)}`,
+        ok ? "info" : "error",
+      );
+      resolve({ ok, output: out });
+    });
+
+    child.stdin.write(prompt);
+    child.stdin.end();
   });
 }
 
