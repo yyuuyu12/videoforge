@@ -32,7 +32,7 @@ Dashboard 开发地址为 `http://localhost:5400`，API 为 `http://localhost:54
 7. HeyGem 生成数字人口型，并拆分为章节预览。
 8. 在数字人或导出环节检查完整音画。
 
-详细架构与启动方式见 [CURRENT-ARCHITECTURE.md](CURRENT-ARCHITECTURE.md) 和 [OPERATIONS.md](OPERATIONS.md)。长期技术决策见 [PROJECT-MEMORY.md](PROJECT-MEMORY.md)。
+当前架构、代码地图与文档索引见 [CLAUDE.md](CLAUDE.md)，启动与运维见 [OPERATIONS.md](OPERATIONS.md)，长期技术决策见 [PROJECT-MEMORY.md](PROJECT-MEMORY.md)。
 
 ## 数据与密钥
 

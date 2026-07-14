@@ -13,6 +13,8 @@ npm start
 
 地址：`http://localhost:5401`。生产构建由 Express 直接提供，不需要另开 Dashboard 端口。
 
+服务端一键成片（导出环节）额外依赖：本机安装 Chrome 或 Edge（渲染器经 playwright-core 调用系统浏览器，无需下载浏览器内核）+ ffmpeg/ffprobe 在 PATH。渲染临时帧写在 `workspaces/job-N/render-tmp/`（成功后自动清理，失败保留现场），成片在 `workspaces/job-N/output.mp4`。
+
 开发方式：
 
 ```powershell

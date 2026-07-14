@@ -1,5 +1,18 @@
 # VideoForge 项目记忆
 
+## 2026-07-14 配置体检整理
+
+- 统一文档入口为 `CLAUDE.md`（并入原 CURRENT-ARCHITECTURE.md、docs/PROJECT-STATUS.md、docs/README.md，三者已删除）。
+- 测试报告归档在 `docs/reports/`；文件归属和提交规则在 `docs/FILE-OWNERSHIP.md`。
+- 删除了 agent-workspace 模板残留（IDENTITY.md / USER.md / BOOTSTRAP.md）。
+- 方法论快照 vendored 进 `skills/`，`server/src/config.js` 指向仓库内路径（不再依赖 `~/.claude/skills` 个人安装位）；TTS 兜底默认 speed 与 DEFAULTS.md 对齐为 1.12。
+- 个人安装位 `~/.claude/skills` 三个视频 skill 已 junction 化 → `F:\Projects\claude-skills` 源码库；机器级路径事实以 `F:\Projects\MACHINE-INDEX.md` + `check-services.ps1` 为准。
+- 服务端一键成片落地：页面内拦截每段配音 `playing` 事件取真实起点，CDP screencast 变长帧采集，ffmpeg adelay 精确摆放混音——帧与音轨同机同源时钟，无需录屏。HeyGem 上传前对非 H.264 源自动转码（cv2 读不了 HEVC，job#11 实证）。
+- 渲染器启动整片播放必须点击 `.auto-gate` 遮罩，不能按 Space——未打 suppressSpace 补丁的旧 scaffold 双监听会跳过第 0 步（实测丢开场第一段，18/19）。scaffold 模板已打补丁（新项目免疫）。
+- 订阅模式生成引擎已迁 Claude Agent SDK（`@anthropic-ai/claude-agent-sdk`，permissionMode=bypassPermissions + settingSources=[]）：无信任对话框 hack、真实 usage/费用上报、个人全局配置不再漏进产品 prompt；`claude -p` 降级为 SDK 不可用时的兜底（仅兜底路径保留 ensureWorkspaceTrusted）。烟测实证：订阅登录直接可用，Write 工具落盘成功。
+- `output/`、运行日志、SQLite 数据库和 `workspaces/` 均视为本地运行态，不提交 Git。
+- 判断当前实现优先参考 `CLAUDE.md`；`ARCHITECTURE.md` 主要保留未来规划和历史决策。
+
 该文件保存长期有效的工程决策，不保存密钥、个人素材或临时任务状态。
 
 ## 产品原则
@@ -31,13 +44,13 @@
 
 ## 当前边界
 
-- 最终 MP4 仍以浏览器自动播放配合录屏为主，尚未实现服务端一键录制。
+- 服务端一键成片已实现（2026-07-14，`server/src/render.js`）：render 阶段/导出面板可直接产出 `output.mp4`；手动录屏降级为渲染失败时的兜底。
 - 数字人全片已可用，但 10 秒分段、乒乓源循环、边界交叉相关对齐仍需继续实现和专项验证。
 - `ARCHITECTURE.md` 包含未来云控制面和跨设备规划，不能当作当前运行状态。
 
 ## 修改纪律
 
-- 变更流水线时同步更新 `CURRENT-ARCHITECTURE.md`。
+- 变更流水线时同步更新 `CLAUDE.md`。
 - 变更服务路径或端口时同步更新 `OPERATIONS.md`。
 - 新增密钥字段必须加入后端打码与 `.gitignore` 检查。
 - 推送前运行 `npm run build`、Node 语法检查和敏感信息扫描。

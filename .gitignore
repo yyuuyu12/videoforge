@@ -7,3 +7,4 @@ workspaces/
 *.log
 .playwright-cli/
 *.tsbuildinfo
+output/
