@@ -71,6 +71,15 @@ function mediaDuration(path) {
   });
 }
 
+function videoCodec(path) {
+  return new Promise((resolve, reject) => {
+    const child = spawn("ffprobe", ["-v", "error", "-select_streams", "v:0", "-show_entries", "stream=codec_name", "-of", "default=nw=1:nk=1", path], { shell: false });
+    let output = "";
+    child.stdout.on("data", (data) => { output += data; });
+    child.on("close", (code) => code === 0 ? resolve(output.trim()) : reject(new Error(`ffprobe failed: ${path}`)));
+  });
+}
+
 function avatarProgress(jobId, percent, message) {
   logEvent(jobId, "avatar_gen", `progress|${Math.max(0, Math.min(100, Math.round(percent)))}|${message}`);
 }
@@ -322,11 +331,24 @@ const runners = {
     const merged = join(avatarDir, "narration.mp3");
     const merge = await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-c:a", "libmp3lame", merged], presDir, job.id, "avatar_gen");
     if (!merge.ok) return merge;
+    // HeyGem 服务端用 cv2 逐帧读上传的视频，HEVC/H.265 源会让 VideoCapture.read
+    // 直接抛异常（job#11 实测：推理到 28% 崩）。非 H.264 源先转码，结果缓存复用。
+    let uploadPath = source;
+    const codec = await videoCodec(source).catch(() => "unknown");
+    if (codec !== "h264") {
+      const normalized = join(avatarDir, "presenter-h264.mp4");
+      if (!existsSync(normalized) || statSync(normalized).mtimeMs < statSync(source).mtimeMs) {
+        avatarProgress(job.id, 9, `出镜视频编码为 ${codec}，正在转码为 HeyGem 兼容的 H.264`);
+        const trans = await sh("ffmpeg", ["-y", "-i", source, "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", normalized], presDir, job.id, "avatar_gen");
+        if (!trans.ok) return trans;
+      }
+      uploadPath = normalized;
+    }
     avatarProgress(job.id, 12, "配音合并完成，正在上传模型");
     const submitted = await submitJob({
       audioB64: readFileSync(merged).toString("base64"),
-      videoB64: readFileSync(source).toString("base64"),
-      videoFmt: source.toLowerCase().endsWith(".mov") ? "mov" : "mp4",
+      videoB64: readFileSync(uploadPath).toString("base64"),
+      videoFmt: uploadPath.toLowerCase().endsWith(".mov") ? "mov" : "mp4",
     });
     avatarProgress(job.id, 18, "HeyGem 已接收任务，开始口型推理");
     let lastProgress = -1;
