@@ -1,0 +1,146 @@
+#!/usr/bin/env python
+"""Computes GROUND-TRUTH per-step seek offsets into public/avatar/lipsync.mp4
+by cross-correlating each step's own audio against the audio HeyGem actually
+embedded in its generated output video for that segment.
+
+Why not just proportionally distribute each segment's real video duration by
+audio-duration share (the original approach, see git history / memory)? That
+assumes HeyGem preserves internal pacing uniformly across a whole segment,
+which it does NOT closely enough for sentence-level accuracy — real playback
+drifted enough from the estimate that lips visibly stopped matching audio.
+Cross-correlating against HeyGem's OWN embedded audio track sidesteps the
+estimate entirely: the embedded audio is (bar re-encoding) the exact audio
+that drove the model's lip generation, so finding where a step's audio
+occurs in it gives the TRUE offset, not a guess.
+
+Requires numpy + scipy — NOT available via plain `node`/npm like the other
+gen-*.mjs scripts in this folder. Run with the HeyGem venv's Python:
+  F:\\qingyuAI\\python-modules\\hdModule\\venv\\python.exe scripts\\align-avatar-offsets.py
+(any Python 3 with numpy+scipy+ffmpeg on PATH works too)
+
+Requires heygem_batch_amv.py's segments.json to already exist (i.e. the
+avatar generation batch must have already run).
+"""
+import glob
+import json
+import os
+import subprocess
+from pathlib import Path
+
+import numpy as np
+from scipy.io import wavfile
+from scipy.signal import fftconvolve
+
+SCRIPT_DIR = Path(__file__).resolve().parent
+PRESENTATION_ROOT = SCRIPT_DIR.parent
+PROJECT_ROOT = PRESENTATION_ROOT.parent
+AUDIO_ROOT = PRESENTATION_ROOT / "public" / "audio"
+OUT_DIR = PROJECT_ROOT / "heygem_outputs"
+TMP_DIR = PROJECT_ROOT / "pingpong" / "_align_tmp"
+FFMPEG = "ffmpeg"
+FFPROBE = "ffprobe"
+SR = 16000
+# Below this normalized-correlation score, don't trust the match — fall back
+# to proportional-by-duration instead. Empirically, real matches score
+# 0.98-1.0 and bad ones (observed so far: always the LAST step of a segment,
+# whose trailing content HeyGem sometimes doesn't reproduce faithfully)
+# score under 0.2 — there is no ambiguous middle ground in practice.
+MIN_CONFIDENCE = 0.7
+
+TMP_DIR.mkdir(parents=True, exist_ok=True)
+
+with open(OUT_DIR / "segments.json", encoding="utf-8") as f:
+    segments = json.load(f)
+
+
+def to_wav(src, out_path):
+    subprocess.run(
+        [FFMPEG, "-y", "-i", str(src), "-ar", str(SR), "-ac", "1", "-vn", "-f", "wav", str(out_path)],
+        check=True, capture_output=True,
+    )
+    return out_path
+
+
+def load_wav(path):
+    sr, data = wavfile.read(path)
+    assert sr == SR
+    if data.dtype != np.float32:
+        data = data.astype(np.float32) / 32768.0
+    return data
+
+
+def ffprobe_duration(path):
+    out = subprocess.run(
+        [FFPROBE, "-v", "error", "-show_entries", "format=duration",
+         "-of", "default=nw=1:nk=1", str(path)],
+        check=True, capture_output=True, text=True,
+    ).stdout.strip()
+    return float(out)
+
+
+def best_offset_seconds(needle, haystack, sr):
+    needle = needle - needle.mean()
+    haystack = haystack - haystack.mean()
+    needle = needle / (np.sqrt((needle ** 2).sum()) + 1e-9)
+    corr = fftconvolve(haystack, needle[::-1], mode="valid")
+    window = len(needle)
+    energy = np.sqrt(np.convolve(haystack ** 2, np.ones(window), mode="valid") + 1e-9)
+    score = corr / energy
+    best_sample = int(np.argmax(score))
+    return best_sample / sr, float(score[best_sample])
+
+
+global_offsets = []
+is_segment_start = []
+cursor = 0.0
+fallback_count = 0
+
+for seg in segments:
+    out_mp4 = OUT_DIR / seg["outputFile"]
+    haystack = load_wav(to_wav(out_mp4, TMP_DIR / (seg["outputFile"] + ".wav")))
+
+    seg_steps = seg["steps"]  # [{chapter, step, duration}, ...] in play order
+    audio_total = sum(s["duration"] for s in seg_steps)
+    real_video_duration = seg["realVideoDuration"]
+
+    audio_so_far = 0.0
+    for i, st in enumerate(seg_steps):
+        step_path = AUDIO_ROOT / st["chapter"] / f"{st['step']}.mp3"
+        needle = load_wav(to_wav(step_path, TMP_DIR / (st["chapter"] + "_" + str(st["step"]) + ".wav")))
+        local_offset, score = best_offset_seconds(needle, haystack, SR)
+
+        if score < MIN_CONFIDENCE:
+            local_offset = (audio_so_far / audio_total) * real_video_duration
+            fallback_count += 1
+            print(f"[{st['chapter']}/{st['step']}] xcorr score {score:.3f} too low, using proportional fallback -> local={local_offset:.3f}s", flush=True)
+        else:
+            print(f"[{st['chapter']}/{st['step']}] xcorr score {score:.3f} -> local={local_offset:.3f}s", flush=True)
+
+        global_offsets.append(round(cursor + local_offset, 3))
+        is_segment_start.append(i == 0)
+        audio_so_far += st["duration"]
+
+    cursor += real_video_duration
+
+total_duration = ffprobe_duration(PRESENTATION_ROOT / "public" / "avatar" / "lipsync.mp4")
+
+banner = f"""// AUTO-GENERATED by scripts/align-avatar-offsets.py — do not hand-edit.
+// AVATAR_OFFSETS[globalStepIndex] = seek time (seconds) into /avatar/lipsync.mp4
+// where that step's narration begins, in the exact flattened order chapters
+// appear in src/registry/chapters.ts. Computed by cross-correlating each
+// step's audio against HeyGem's own embedded output audio (ground truth),
+// falling back to proportional-by-duration only where that match's
+// confidence was too low to trust ({fallback_count} of {len(global_offsets)} steps this run).
+// AVATAR_SEGMENT_START[globalStepIndex] = true only for the first step of
+// each generated segment (~10s apart) — marks a genuine cut in the source
+// footage. (useAvatarSync currently slaves the video to the audio clock and
+// doesn't branch on this, but it's kept for tooling/debugging.)
+export const AVATAR_VIDEO_SRC = "/avatar/lipsync.mp4";
+export const AVATAR_TOTAL_DURATION = {total_duration:.3f};
+export const AVATAR_OFFSETS: number[] = {json.dumps(global_offsets)};
+export const AVATAR_SEGMENT_START: boolean[] = {json.dumps(is_segment_start)};
+"""
+
+out_ts = PRESENTATION_ROOT / "src" / "registry" / "avatarOffsets.ts"
+out_ts.write_text(banner, encoding="utf-8")
+print(f"\nwrote {len(global_offsets)} offsets ({fallback_count} proportional fallbacks) to {out_ts}")

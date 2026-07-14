@@ -15,15 +15,19 @@ const DEFAULTS = {
     timeoutMs: 5400000,
     maxConcurrent: 1,
   },
+  // 方法论真源 = 仓库内快照（skills/），不依赖任何机器的个人 skill 安装位。
+  // 更新流程：改 F:\Projects\claude-skills 源码库 → 同步快照进本仓库 → 提交。
   skills: {
-    webVideoPresentation: "C:/Users/木木/.claude/skills/web-video-presentation",
-    videoAvatarSubtitles: "C:/Users/木木/.claude/skills/video-avatar-subtitles",
+    webVideoPresentation: join(ROOT, "skills", "web-video-presentation"),
+    videoAvatarSubtitles: join(ROOT, "skills", "video-avatar-subtitles"),
+    article2video: join(ROOT, "skills", "article2video"),
   },
   tts: {
     provider: "minimax-http",
     apiKeyEnv: "MINIMAX_API_KEY",
     voiceId: "GongheJiucun02",
-    speed: 1.0,
+    // 与 skills/article2video/references/DEFAULTS.md 定稿一致（5 版 A/B 后用户选定）
+    speed: 1.12,
   },
   devServerBasePort: 5300,
   discovery: { intervalMinutes: 120, autoStart: true },
