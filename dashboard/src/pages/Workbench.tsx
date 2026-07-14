@@ -128,6 +128,7 @@ export function Workbench({
   const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({});
   const [busy, setBusy] = useState(false);
   const [uploadState, setUploadState] = useState("");
+  const [avatarState, setAvatarState] = useState("");
   const [regenerateState, setRegenerateState] = useState("");
   const [previewError, setPreviewError] = useState("");
   const lastCurrent = useRef<number | null>(null);
@@ -204,6 +205,18 @@ export function Workbench({
   const activeProgressParts = activeProgressEvent?.message.split("|") ?? [];
   const activePercent = Number(activeProgressParts[1] ?? 0);
   const activeProgressText = activeProgressParts[2] || stageProgress[job.stage] || "正在处理当前任务";
+  const retryFailedStage = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.retry(job.id, job.stage);
+      await load();
+    } catch (error) {
+      setRegenerateState(`重试提交失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setBusy(false);
+    }
+  };
   const ensurePreview = async () => {
     if (!job.devServer.running) {
       setBusy(true);
@@ -728,12 +741,26 @@ export function Workbench({
                   job.stage === "avatar_gen" &&
                   ["queued", "running"].includes(job.status)
                 }
-                onClick={() => api.generateAvatar(job.id).then(load)}
+                onClick={async () => {
+                  setAvatarState("正在提交数字人对口型任务…");
+                  try {
+                    await api.generateAvatar(job.id);
+                    setAvatarState("任务已提交，正在检查 HeyGem 服务…");
+                    await load();
+                  } catch (error) {
+                    setAvatarState(
+                      error instanceof Error
+                        ? `提交失败：${error.message}`
+                        : "提交失败，请检查 HeyGem 服务设置",
+                    );
+                  }
+                }}
               >
                 调用 HeyGem 生成对口型
               </button>
             )}
           </div>
+          {avatarState && <p className="vf-upload-state">{avatarState}</p>}
           {uploadState && (
             <p
               className={
@@ -860,6 +887,18 @@ export function Workbench({
             </span>
           </div>
           <em>{job.status === "queued" ? "等待开始" : "进行中"}</em>
+        </div>
+      )}
+      {job.status === "failed" && (
+        <div className="vf-failed-banner" role="alert">
+          <div className="vf-failed-banner-copy">
+            <strong>任务失败，已停止继续处理</strong>
+            <span>{job.error || "后端未返回具体错误"}</span>
+            <small>失败阶段：{job.stage}</small>
+          </div>
+          <button type="button" onClick={() => void retryFailedStage()} disabled={busy}>
+            {busy ? "正在重试..." : "重试此环节"}
+          </button>
         </div>
       )}
       <div className={`vf-studio ${!chatEnabled ? "vf-studio-full" : ""}`}>

@@ -33,6 +33,7 @@ export interface Job {
   created_at: string;
   updated_at: string;
   excerpt?: string | null;
+  error?: string | null;
 }
 
 export interface JobEvent {

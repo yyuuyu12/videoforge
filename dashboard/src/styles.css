@@ -105,3 +105,11 @@ button { cursor: pointer; }
 @keyframes vf-opening-dot { 0%,60%,100% { opacity:.28; transform:translateY(0); } 30% { opacity:1; transform:translateY(-4px); } }
 @media (prefers-reduced-motion:reduce) { .vf-opening-character,.vf-opening-clap,.vf-opening-clap-lines,.vf-opening-sparkles,.vf-opening-dots i { animation:none; } }
 .card { margin:0 0 14px; padding:22px 24px; border:1px solid rgba(255,255,255,.78); border-radius:18px; background:rgba(255,253,248,.62); box-shadow:0 8px 32px rgba(107,74,47,.08); }.card h3 { margin:0 0 8px; color:#4a3220; font-size:15px; }.card p,.muted { color:#8c7a66; font-size:13px; line-height:1.65; }.row { display:flex; align-items:center; gap:10px; flex-wrap:wrap; }.row input,.row select,.card input,.card select { min-height:42px; border:1px solid rgba(138,90,51,.22); border-radius:10px; padding:10px 12px; background:rgba(255,255,255,.72); color:#3b2d1f; }.card button { min-height:40px; border:1px solid rgba(138,90,51,.28); border-radius:10px; padding:9px 15px; background:#fffdf8; color:#7a4f2a; font-weight:700; }.card button.primary { border:0; background:#7a4f2a; color:#fffdf8; }.badge { display:inline-block; padding:4px 8px; border-radius:99px; background:rgba(46,125,79,.1); color:#2e7d4f; font-size:11px; }
+.vf-failed-banner { display:flex; align-items:center; justify-content:space-between; gap:18px; margin:0 0 18px; padding:16px 18px; border:1px solid rgba(176,61,49,.34); border-radius:14px; background:rgba(255,241,236,.82); box-shadow:0 6px 20px rgba(120,54,37,.08); }
+.vf-failed-banner-copy { display:flex; min-width:0; flex-direction:column; gap:4px; }
+.vf-failed-banner-copy strong { color:#8e3028; font-size:14px; }
+.vf-failed-banner-copy span { overflow-wrap:anywhere; color:#70463b; font-size:12px; line-height:1.55; }
+.vf-failed-banner-copy small { color:#a36d5b; font-size:11px; }
+.vf-failed-banner button { flex:0 0 auto; border:0; border-radius:9px; padding:9px 14px; background:#9d4037; color:#fffdf8; font-size:12px; font-weight:700; }
+.vf-failed-banner button:disabled { cursor:wait; opacity:.58; }
+@media (max-width:640px) { .vf-failed-banner { align-items:stretch; flex-direction:column; } .vf-failed-banner button { width:100%; } }
