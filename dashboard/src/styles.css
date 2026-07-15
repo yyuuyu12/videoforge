@@ -242,6 +242,7 @@ body { color:var(--vf-ink); background:linear-gradient(135deg,#f2eadc 0%,#fffdf8
 .vf-generation-preview { display:flex; min-height:420px; flex-direction:column; align-items:center; justify-content:center; gap:12px; background:rgba(248,241,231,.72); color:var(--vf-ink); text-align:center; }
 .vf-generation-preview b { font-size:18px; }
 .vf-generation-preview>span:last-child { color:var(--vf-muted); font-size:12px; }
+.vf-chapter-review-list button:disabled { cursor:not-allowed; opacity:.58; }
 
 /* Keep the compact composer scrollable without showing Windows' arrow controls. */
 .vf-chat-input textarea { scrollbar-width:none; }

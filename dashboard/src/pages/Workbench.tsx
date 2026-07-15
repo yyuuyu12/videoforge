@@ -199,6 +199,7 @@ export function Workbench({
   const [previewError, setPreviewError] = useState("");
   const [previewNotice, setPreviewNotice] = useState("");
   const [previewRevision, setPreviewRevision] = useState(0);
+  const [incrementalPreviewBuilding, setIncrementalPreviewBuilding] = useState(false);
   const [renderConfirmOpen, setRenderConfirmOpen] = useState(false);
   const [sourceEditing, setSourceEditing] = useState(false);
   const [sourceDraft, setSourceDraft] = useState("");
@@ -206,6 +207,7 @@ export function Workbench({
   const lastCurrent = useRef<number | null>(null);
   const trackedFeedbackIds = useRef(new Set<number>());
   const feedbackStatuses = useRef(new Map<number, string>());
+  const incrementalPreviewKey = useRef("");
   const load = () =>
     api
       .job(jobId)
@@ -223,6 +225,8 @@ export function Workbench({
     setPreviewNotice("");
     setChapterFeedbackScope("chapter");
     setFeedbackSending(false);
+    setIncrementalPreviewBuilding(false);
+    incrementalPreviewKey.current = "";
     trackedFeedbackIds.current.clear();
     feedbackStatuses.current.clear();
   }, [jobId]);
@@ -309,6 +313,35 @@ export function Workbench({
       }
     }
   }, [job, jobId]);
+  useEffect(() => {
+    if (!job || job.stage !== "chapter_gen") return;
+    const completed = job.chapterGeneration.completed;
+    if (completed < 1) return;
+    const key = `${job.id}:${completed}`;
+    if (incrementalPreviewKey.current === key) return;
+    incrementalPreviewKey.current = key;
+    setIncrementalPreviewBuilding(true);
+    setPreviewError("");
+    void api.devStart(job.id)
+      .then(() => api.job(job.id))
+      .then((nextJob) => {
+        setJob(nextJob);
+        setPreviewRevision((value) => value + 1);
+        setPreviewNotice(`前 ${completed} 章已完成，可以逐章预览`);
+      })
+      .catch((error) => {
+        if (incrementalPreviewKey.current === key) incrementalPreviewKey.current = "";
+        setPreviewError(`已完成章节暂时无法构建预览：${error instanceof Error ? error.message : "未知错误"}`);
+      })
+      .finally(() => setIncrementalPreviewBuilding(false));
+  }, [
+    job?.id,
+    job?.stage,
+    job?.status,
+    job?.chapterGeneration.completed,
+    job?.chapterGeneration.current?.status,
+    job?.chapterGeneration.message,
+  ]);
   const meta = useMemo(() => (job ? parseMeta(job) : {}), [job]);
   if (!job || selected === null) return <WorkbenchLoading />;
   const current = phaseIndex(job);
@@ -340,6 +373,10 @@ export function Workbench({
     ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}chapter=${activeChapter.index - 1}&revision=${previewRevision}`
     : previewUrl;
   const chapterGenerationRunning = job.stage === "chapter_gen" && ["queued", "running"].includes(job.status);
+  const activeChapterPreviewable = Boolean(
+    activeChapter?.ready
+      && (job.stage !== "chapter_gen" || ["review", "approved"].includes(activeChapter.status)),
+  );
   const activeProgressEvent = job.events.find(
     (event) => event.stage === job.stage && event.message.startsWith("progress|"),
   );
@@ -843,39 +880,44 @@ export function Workbench({
             <p>{chapterGeneration.message}</p>
             {chapterGenerationRunning && (
               <p className="vf-generation-explainer" role="status">
-                正在按新风格重做画面。生成期间不会展示旧版预览；全部章节生成并通过检查后，左侧会自动更新。
+                已完成并检查通过的章节会自动加入预览；正在生成的章节完成后也会继续更新。
               </p>
             )}
             {chapterGeneration.chapters.length > 0 && (
               <div className="vf-chapter-review-list">
-                {chapterGeneration.chapters.map((chapter) => (
-                  <button
-                    key={chapter.key}
-                    className={selectedChapter === chapter.key ? "selected" : ""}
-                    onClick={() => {
-                      syncPreviewChapter(chapter.index - 1);
-                      setSelectedChapter(chapter.key);
-                    }}
-                  >
-                    <i className={chapter.status}>
-                      {chapter.status === "approved" ? "✓" : chapter.index}
-                    </i>
-                    <span>
-                      <b>{chapter.title}</b>
-                      <small>
-                        {chapter.status === "approved"
-                          ? "已确认"
-                          : chapter.status === "queued"
-                            ? "等待生成"
-                            : chapter.status === "generating"
-                              ? "正在生成"
-                            : chapter.ready
-                              ? `待确认 · ${chapter.steps} 个画面步骤`
-                              : "正在生成"}
-                      </small>
-                    </span>
-                  </button>
-                ))}
+                {chapterGeneration.chapters.map((chapter) => {
+                  const previewable = chapter.ready
+                    && (job.stage !== "chapter_gen" || ["review", "approved"].includes(chapter.status));
+                  return (
+                    <button
+                      key={chapter.key}
+                      disabled={!previewable}
+                      className={selectedChapter === chapter.key ? "selected" : ""}
+                      onClick={() => {
+                        syncPreviewChapter(chapter.index - 1);
+                        setSelectedChapter(chapter.key);
+                      }}
+                    >
+                      <i className={chapter.status}>
+                        {chapter.status === "approved" ? "✓" : chapter.index}
+                      </i>
+                      <span>
+                        <b>{chapter.title}</b>
+                        <small>
+                          {chapter.status === "approved"
+                            ? "已确认"
+                            : chapter.status === "queued"
+                              ? "等待生成"
+                              : chapter.status === "generating"
+                                ? "正在生成"
+                              : chapter.ready
+                                ? `待确认 · ${chapter.steps} 个画面步骤`
+                                : "正在生成"}
+                        </small>
+                      </span>
+                    </button>
+                  );
+                })}
               </div>
             )}
           </section>
@@ -902,13 +944,7 @@ export function Workbench({
               )}
             </div>
           )}
-          {chapterGenerationRunning ? (
-            <div className="vf-preview vf-generation-preview" role="status" aria-live="polite">
-              <span className="vf-loading-ring" />
-              <b>正在生成新版画面</b>
-              <span>{chapterGeneration.completed}/{chapterGeneration.current?.total || chapterGeneration.expected || "?"} 章完成，全部检查通过后自动显示</span>
-            </div>
-          ) : previewUrl ? (
+          {previewUrl && activeChapterPreviewable ? (
             <iframe
               key={`chapters-${job.stage}-${previewRevision}`}
               className="vf-live-preview"
@@ -916,6 +952,12 @@ export function Workbench({
               src={chapterPreviewUrl}
               allow="autoplay; fullscreen"
             />
+          ) : chapterGenerationRunning || incrementalPreviewBuilding ? (
+            <div className="vf-preview vf-generation-preview" role="status" aria-live="polite">
+              <span className="vf-loading-ring" />
+              <b>{incrementalPreviewBuilding ? "正在更新已完成章节预览" : "正在生成新版画面"}</b>
+              <span>{chapterGeneration.completed}/{chapterGeneration.current?.total || chapterGeneration.expected || "?"} 章完成，可以先查看已完成章节</span>
+            </div>
           ) : (
             <div className="vf-preview">
               <b>VideoForge</b>
@@ -923,8 +965,11 @@ export function Workbench({
             </div>
           )}
           <div className="vf-stage-actions">
-            <button onClick={ensurePreview} disabled={chapterGenerationRunning}>
-              {busy ? "正在启动…" : "加载预览"}
+            <button
+              onClick={ensurePreview}
+              disabled={busy || incrementalPreviewBuilding || (job.stage === "chapter_gen" && chapterGeneration.completed < 1)}
+            >
+              {busy || incrementalPreviewBuilding ? "正在更新…" : chapterGenerationRunning ? "加载已完成章节" : "加载预览"}
             </button>
             {previewUrl && (
               <a
