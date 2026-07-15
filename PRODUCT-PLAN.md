@@ -162,7 +162,7 @@ v1 是录屏指引（最可靠）。v2 上服务端自动成片：Playwright 无
 
 ### 第三梯队：打包与首次体验
 
-#### B6. 自包含分发包（✅ 2026-07-15 首版：scripts/package-portable.ps1 产出 445MB 便携目录，Node 随包、共享依赖随包并自动供给；冷启动实测通过。待：ffmpeg 随包、压缩安装器）
+#### B6. 自包含分发包（✅ 2026-07-15 首版：scripts/package-portable.ps1 产出便携目录，Node、共享依赖、ffmpeg/ffprobe 均随包并自动供给；冷启动实测通过。待：压缩安装器）
 
 - 打包 Node runtime、server、dashboard 及 ffmpeg/ffprobe（约 100 MB）。
 - 第一版采用绿色便携包：解压后双击启动脚本；后续再评估 Electron/Tauri 外壳。

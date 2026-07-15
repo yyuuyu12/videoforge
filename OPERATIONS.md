@@ -13,7 +13,7 @@ npm start
 
 地址：`http://localhost:5401`。生产构建由 Express 直接提供，不需要另开 Dashboard 端口。
 
-服务端一键成片（导出环节）额外依赖：本机安装 Chrome 或 Edge（渲染器经 playwright-core 调用系统浏览器，无需下载浏览器内核）+ ffmpeg/ffprobe 在 PATH。渲染临时帧写在 `workspaces/job-N/render-tmp/`（成功后自动清理，失败保留现场），成片在 `workspaces/job-N/output.mp4`。
+服务端一键成片（导出环节）额外依赖：本机安装 Chrome 或 Edge（渲染器经 playwright-core 调用系统浏览器，无需下载浏览器内核）。源码开发环境要求 ffmpeg/ffprobe 在 PATH；便携包已内置两者。渲染临时帧写在 `workspaces/job-N/render-tmp/`（成功后自动清理，失败保留现场），成片在 `workspaces/job-N/output.mp4`。
 
 开发方式：
 
@@ -100,7 +100,7 @@ $env:HEYGEM_DIR='F:\other\ZHhinengti\aigc-human\python-modules\hdModule'
 powershell -ExecutionPolicy Bypass -File scripts\package-portable.ps1
 ```
 
-产出 `output/VideoForge-portable/`（~445MB）：Node 随包、服务端运行时依赖干净安装、共享演示依赖随包（首启自动复制到用户数据目录，零网络）。使用机器需要系统 Chrome/Edge 与 PATH 中的 ffmpeg（导出成片用）。数据落 `%APPDATA%\VideoForge`。
+产出 `output/VideoForge-portable/`（当前 full-build ffmpeg 约 870MB）：Node、ffmpeg/ffprobe、服务端运行时依赖和共享演示依赖均随包（首启自动复制演示依赖到用户数据目录，零网络）。使用机器只需 Windows 10+ 和系统 Chrome/Edge，不要求安装 Node、npm 或 ffmpeg。数据落 `%APPDATA%\VideoForge`。
 
 ## 8. 日常迭代与验证规范
 

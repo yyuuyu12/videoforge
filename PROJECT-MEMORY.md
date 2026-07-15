@@ -3,6 +3,7 @@
 ## 2026-07-15 B8 收尾能力
 
 - Dashboard 的 API 请求统一在 `dashboard/src/api.ts` 翻译常见技术错误；优先保留简短、明确的中文业务校验，连接、超时、鉴权、额度、HeyGem、Whisper 和 ffmpeg 故障必须给出可执行的下一步。
+- 便携包脚本 `scripts/package-portable.ps1` 会复制打包机 PATH 中的 `ffmpeg.exe` / `ffprobe.exe` 到包根目录，启动脚本将包根目录置于 PATH 首位；打包前需确认两者均可执行。
 - `/api/diagnostics` 是远程排障入口：只导出公开配置状态、最近 20 个作品、最近 200 条事件和日志文件元数据；Bearer、API key、`sk-` 密钥和 JWT 形态内容必须脱敏。
 - `/api/version` 仅查询 GitHub Release 并提示新版，5 秒超时、15 分钟缓存；检查失败不阻塞启动，也不自动下载、覆盖程序或修改用户数据。
 
