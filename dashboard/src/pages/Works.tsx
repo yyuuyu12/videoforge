@@ -43,7 +43,7 @@ export function Works({ onOpen, onCreate }: { onOpen: (id: number) => void; onCr
       return <article className="vf-work-card" key={work.id}>
         <button className={`vf-cover ${coverTone}`} aria-label={`打开 ${workTitle}`} title={workTitle} onClick={() => onOpen(work.id)}>
           <span className="vf-cover-copy"><small>{hasResult ? "VIDEOFORGE / RESULT" : "VIDEOFORGE / DRAFT"}</small><b>{workTitle}</b>{!hasResult && work.excerpt && <em>{work.excerpt}</em>}</span>
-          {hasResult && <img src={`/api/jobs/${work.id}/cover`} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />}
+          {work.coverExists && <img src={`/api/jobs/${work.id}/cover?v=${encodeURIComponent(work.updated_at)}`} alt="" onError={(event) => { event.currentTarget.hidden = true; }} />}
         </button>
         <div className="vf-work-copy"><div className="vf-card-top"><span className={`vf-badge ${status.tone}`}>{status.label}</span><time>{work.updated_at.slice(0, 16).replace("T", " ")}</time></div><h3 title={workTitle}>{workTitle}</h3><p>{status.detail}</p><div className="vf-work-actions"><button className="vf-text-button" onClick={() => onOpen(work.id)}>{status.action} <span>→</span></button><button className="vf-delete-button" disabled={deletingId === work.id || isGenerating} title={isGenerating ? "作品正在生成，完成或失败后可删除" : "永久删除作品"} onClick={() => setPendingDelete(work)}>{deletingId === work.id ? "删除中…" : "删除"}</button></div></div>
       </article>;

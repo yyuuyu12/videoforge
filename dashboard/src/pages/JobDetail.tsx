@@ -44,6 +44,7 @@ export function JobDetail({
   const [err, setErr] = useState("");
   const [script, setScript] = useState<string | null>(null);
   const [autoStarted, setAutoStarted] = useState(false);
+  const [previewRevision, setPreviewRevision] = useState(0);
 
   useEffect(() => {
     const load = () => api.job(jobId).then(setJob).catch(() => {});
@@ -186,6 +187,9 @@ export function JobDetail({
                 </button>
               ) : (
                 <>
+                  <button disabled={busy} onClick={() => act(async () => { await api.devStart(job.id); setPreviewRevision((value) => value + 1); })}>
+                    刷新预览
+                  </button>
                   <a href={job.devServer.url} target="_blank" rel="noreferrer">
                     新窗口打开
                   </a>
@@ -197,7 +201,7 @@ export function JobDetail({
             </div>
           </div>
           {job.devServer.running ? (
-            <iframe className="preview-frame" src={job.devServer.url} title="preview" />
+            <iframe key={previewRevision} className="preview-frame" src={job.devServer.url} title="preview" />
           ) : (
             <div className="muted">预览启动中…（章节刚生成完第一次启动要装依赖，可能要一两分钟）</div>
           )}

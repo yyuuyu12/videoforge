@@ -8,14 +8,14 @@
   overflow: hidden;
   border: 0;
   padding: 0;
-  background: #315a59;
+  background: #76553b;
   color: #fff;
   text-align: left;
 }
 
-.vf-cover.tone-0 { background: #315a59; }
+.vf-cover.tone-0 { background: #76553b; }
 .vf-cover.tone-1 { background: #9d4939; }
-.vf-cover.tone-2 { background: #38485f; }
+.vf-cover.tone-2 { background: #5f493a; }
 .vf-cover.tone-3 { background: #706044; }
 
 .vf-cover img {

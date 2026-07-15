@@ -18,7 +18,7 @@ const DEFAULTS = {
     provider: "anthropic", // "anthropic" | "openai-compatible"
     baseUrl: "", // only for openai-compatible (e.g. https://api.deepseek.com/v1)
     apiKey: "",
-    model: "gpt-5.5",
+    model: "gpt-5.6-terra",
   },
   minimax: {
     apiKey: "", // empty = fall back to MINIMAX_API_KEY env var (v1 behavior)

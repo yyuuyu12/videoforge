@@ -17,8 +17,8 @@ export function NewWork({ onCreated }: { onCreated: (id: number) => void }) {
     return () => window.clearInterval(timer);
   }, []);
   const submit = async () => {
-    if (mode === "text" && content.trim().length < 80)
-      return setError("先补充一段至少 80 字的内容。");
+    if (mode === "text" && content.trim().length < 200)
+      return setError("先补充一段至少 200 字的完整内容。");
     if (mode !== "text" && !url.trim())
       return setError(
         mode === "douyin"
@@ -58,7 +58,7 @@ export function NewWork({ onCreated }: { onCreated: (id: number) => void }) {
           <h2>从内容开始</h2>
           <p>先给我们一段可靠的原始内容，后续的稿子和画面都会围绕它制作。</p>
         </div>
-        <span className="vf-step-count">1 / 4</span>
+          <span className="vf-step-count">原文草稿</span>
       </section>
       <section className="vf-source-panel">
         <div className="vf-choice-tabs">
@@ -118,7 +118,7 @@ export function NewWork({ onCreated }: { onCreated: (id: number) => void }) {
           <p>
             {mode === "douyin"
               ? "优先读取作品内文案；没有字幕时自动下载原声并进行语音转文字。"
-              : "下一步会自动写出适合口播的稿子，你可以在制作前确认和修改。"}
+              : "创建后先进入原文确认，不会立即调用模型。确认内容无误后，再进入口播稿生成。"}
           </p>
           <button className="vf-primary" disabled={busy} onClick={submit}>
             {busy
@@ -127,7 +127,7 @@ export function NewWork({ onCreated }: { onCreated: (id: number) => void }) {
                 : "正在创建…"
               : mode === "douyin"
                 ? "开始提取文案"
-                : "开始制作 →"}
+                : "创建草稿，检查原文 →"}
           </button>
         </div>
       </section>

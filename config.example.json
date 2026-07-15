@@ -19,6 +19,7 @@
     "speed": 1.0
   },
   "devServerBasePort": 5300,
+  "previewMode": "static",
   "discovery": {
     "intervalMinutes": 120,
     "autoStart": true

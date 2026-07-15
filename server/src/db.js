@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS jobs (
   workspace TEXT NOT NULL,
   stage TEXT NOT NULL DEFAULT 'script_outline',
   status TEXT NOT NULL DEFAULT 'queued',
+  error TEXT,
   meta TEXT DEFAULT '{}',
   created_at TEXT DEFAULT (datetime('now')),
   updated_at TEXT DEFAULT (datetime('now'))
@@ -108,6 +109,9 @@ CREATE TABLE IF NOT EXISTS douyin_extractions (
 
 const extractionColumns = db.prepare("PRAGMA table_info(douyin_extractions)").all().map((column) => column.name);
 if (!extractionColumns.includes("job_id")) db.exec("ALTER TABLE douyin_extractions ADD COLUMN job_id INTEGER");
+
+const jobColumns = db.prepare("PRAGMA table_info(jobs)").all().map((column) => column.name);
+if (!jobColumns.includes("error")) db.exec("ALTER TABLE jobs ADD COLUMN error TEXT");
 
 const feedbackColumns = db.prepare("PRAGMA table_info(feedback)").all().map((column) => column.name);
 if (!feedbackColumns.includes("progress")) db.exec("ALTER TABLE feedback ADD COLUMN progress INTEGER NOT NULL DEFAULT 0");

@@ -6,7 +6,7 @@ import { db, getJob, logEvent, updateJob } from "./db.js";
 import { fetchArticleText, runDiscovery } from "./workers/discovery.js";
 import { approveGate, retryJob } from "./workers/pipeline.js";
 import { runFeedback, STAGES } from "./stages.js";
-import { devServerStatus, startDevServer, stopDevServer } from "./devServers.js";
+import { previewStatus, startPreview, stopPreview } from "./preview.js";
 import { renderJob } from "./render.js";
 import { publicSettings, saveSettings } from "./settings.js";
 import { testLlmConnection } from "./providers.js";
@@ -47,7 +47,8 @@ function chapterGeneration(job) {
           const first = lines[0]?.replace(/^\s*["'`]|["'`],?\s*$/g, "").trim();
           if (first) title = first.length > 30 ? `${first.slice(0, 30)}…` : first;
         }
-        const ready = Boolean(narrationFile && files.some((name) => name.endsWith(".tsx")) && files.some((name) => name.endsWith(".css")));
+        // Chapters may use the shared presentation stylesheet instead of a per-chapter CSS file.
+        const ready = Boolean(narrationFile && files.some((name) => name.endsWith(".tsx")));
         return {
           key: entry.name,
           index: index + 1,
@@ -318,9 +319,17 @@ api.post("/jobs/:id/avatar/select", (req, res) => {
   copyFileSync(join(avatarLibraryDir, basename(asset.filename)), join(dir, saved));
   let meta = {};
   try { meta = JSON.parse(job.meta || "{}"); } catch {}
-  meta.avatar = { ...(meta.avatar ?? {}), enabled: true, source: `assets/${saved}`, filename: asset.name, assetId: asset.id };
+  meta.avatar = {
+    ...(meta.avatar ?? {}),
+    enabled: true,
+    source: `assets/${saved}`,
+    filename: asset.name,
+    assetId: asset.id,
+    pendingRegeneration: true,
+  };
   updateJob(job.id, { meta: JSON.stringify(meta) });
-  res.json({ ok: true });
+  logEvent(job.id, "avatar_gen", `已切换数字人素材：${asset.name}；等待重新生成口型`);
+  res.json({ ok: true, asset: { id: asset.id, name: asset.name }, pendingRegeneration: true });
 });
 
 // ---- sources & discovery --------------------------------------------------
@@ -420,7 +429,7 @@ api.post("/articles/:id/dismiss", (req, res) => {
   res.json({ ok: true });
 });
 
-/** 选中 -> create a job + workspace with article.md, queue the pipeline. */
+/** 选中 -> create a draft job + workspace, then wait for source confirmation. */
 api.post("/articles/:id/select", async (req, res) => {
   const article = db.prepare("SELECT * FROM articles WHERE id = ?").get(Number(req.params.id));
   if (!article) return res.status(404).json({ error: "article not found" });
@@ -438,7 +447,7 @@ api.post("/articles/:id/select", async (req, res) => {
   }
 
   const jobRow = db
-    .prepare("INSERT INTO jobs (article_id, title, workspace) VALUES (?, ?, '')")
+    .prepare("INSERT INTO jobs (article_id, title, workspace, stage, status) VALUES (?, ?, '', 'gate_source', 'waiting_approval')")
     .run(article.id, article.title);
   const jobId = Number(jobRow.lastInsertRowid);
   const workspace = join(config.workspacesRoot, `job-${jobId}`);
@@ -447,7 +456,7 @@ api.post("/articles/:id/select", async (req, res) => {
     join(workspace, "article.md"),
     `# ${article.title}\n\n${content}\n\n---\n\n来源：${article.url ?? "手动提供"}\n`,
   );
-  updateJob(jobId, { workspace, status: "queued" });
+  updateJob(jobId, { workspace, stage: "gate_source", status: "waiting_approval", error: null });
   db.prepare("UPDATE articles SET status = 'selected' WHERE id = ?").run(article.id);
   logEvent(jobId, "init", `workspace created: ${workspace}`);
   res.json({ jobId, workspace });
@@ -456,13 +465,20 @@ api.post("/articles/:id/select", async (req, res) => {
 // ---- jobs -------------------------------------------------------------------
 
 api.get("/jobs", (_req, res) => {
-  res.json(db.prepare(`
+  const jobs = db.prepare(`
     SELECT jobs.*, substr(coalesce(articles.summary, articles.content, ''), 1, 140) AS excerpt
     FROM jobs
     LEFT JOIN articles ON articles.id = jobs.article_id
     ORDER BY jobs.id DESC
     LIMIT 100
-  `).all());
+  `).all();
+  res.json(jobs.map((job) => ({
+    ...job,
+    coverExists: [
+      join(job.workspace, "presentation", "public", "cover.png"),
+      join(job.workspace, "presentation", "cover.png"),
+    ].some((path) => existsSync(path)),
+  })));
 });
 
 api.delete("/jobs/:id", (req, res) => {
@@ -567,6 +583,10 @@ api.get("/jobs/:id", (req, res) => {
   const events = db
     .prepare("SELECT * FROM job_events WHERE job_id = ? ORDER BY id DESC LIMIT 100")
     .all(job.id);
+  const eventError = events.find((event) => event.level === "error" && event.message.startsWith("stage FAILED"));
+  const displayError = job.error
+    || (job.status === "failed" ? eventError?.message.replace(/^stage FAILED after \d+s:\s*/, "") : null)
+    || null;
   const feedback = db
     .prepare("SELECT * FROM feedback WHERE job_id = ? ORDER BY id DESC LIMIT 50")
     .all(job.id);
@@ -575,7 +595,7 @@ api.get("/jobs/:id", (req, res) => {
   if (output.exists) {
     try { output = { ...JSON.parse(readFileSync(join(job.workspace, "render-meta.json"), "utf8")), ...output }; } catch {}
   }
-  res.json({ ...job, events, feedback, output, chapterGeneration: chapterGeneration(job), devServer: devServerStatus(job.id) });
+  res.json({ ...job, error: displayError, events, feedback, output, chapterGeneration: chapterGeneration(job), devServer: previewStatus(job) });
 });
 
 api.put("/jobs/:id/options", (req, res) => {
@@ -603,17 +623,28 @@ api.post("/jobs/:id/avatar", (req, res) => {
   writeFileSync(join(dir, saved), Buffer.from(dataBase64, "base64"));
   let meta = {};
   try { meta = JSON.parse(job.meta || "{}"); } catch {}
-  meta.avatar = { ...(meta.avatar ?? {}), enabled: true, source: `assets/${saved}`, filename };
+  meta.avatar = { ...(meta.avatar ?? {}), enabled: true, source: `assets/${saved}`, filename, pendingRegeneration: true };
   updateJob(job.id, { meta: JSON.stringify(meta) });
   res.json({ ok: true, filename });
 });
 
-api.post("/jobs/:id/avatar/generate", (req, res) => {
+api.post("/jobs/:id/avatar/generate", async (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "not found" });
-  updateJob(job.id, { stage: "avatar_gen", status: "queued" });
+  let meta = {};
+  try { meta = JSON.parse(job.meta || "{}"); } catch {}
+  const source = meta.avatar?.source && join(job.workspace, meta.avatar.source);
+  if (!source || !existsSync(source)) {
+    return res.status(409).json({ error: "请先选择一段出镜视频，再生成数字人" });
+  }
+  const service = await heygemHealth();
+  if (!service.ok || !service.ready) {
+    logEvent(job.id, "avatar_gen", "HeyGem 未就绪，未提交口型生成", "error");
+    return res.status(409).json({ error: "HeyGem 当前未启动或还在加载模型。请启动服务并确认状态变为“可用”后，再重新生成。" });
+  }
+  updateJob(job.id, { stage: "avatar_gen", status: "queued", error: null });
   logEvent(job.id, "avatar_gen", "已提交数字人对口型任务");
-  res.json({ ok: true });
+  res.status(202).json({ ok: true, accepted: true });
 });
 
 api.get("/jobs/:id/audit", async (req, res) => {
@@ -623,7 +654,9 @@ api.get("/jobs/:id/audit", async (req, res) => {
   try { meta = JSON.parse(job.meta || "{}"); } catch {}
   const pres = join(job.workspace, "presentation");
   const chapterRoot = join(pres, "src", "chapters");
-  const chapters = readdirSync(chapterRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory());
+  const chapters = existsSync(chapterRoot)
+    ? readdirSync(chapterRoot, { withFileTypes: true }).filter((entry) => entry.isDirectory())
+    : [];
   const layout = chapters.map((entry) => {
     const files = readdirSync(join(chapterRoot, entry.name)).filter((name) => name.endsWith(".css"));
     const content = files.map((name) => readFileSync(join(chapterRoot, entry.name, name), "utf8")).join("\n");
@@ -638,12 +671,23 @@ api.get("/jobs/:id/audit", async (req, res) => {
   const audioRoot = join(pres, "public", "audio");
   const countAudio = (dir) => readdirSync(dir, { withFileTypes: true }).reduce((sum, entry) => sum + (entry.isDirectory() ? countAudio(join(dir, entry.name)) : entry.name.endsWith(".mp3") ? 1 : 0), 0);
   const avatarFile = join(pres, "public", "avatar", "lipsync.mp4");
+  const avatarPreviewDir = join(pres, "public", "avatar", "chapters");
+  const subtitleFile = join(pres, "src", "registry", "subtitleCues.ts");
+  const outputFile = join(job.workspace, "output.mp4");
   const sourceExists = Boolean(meta.avatar?.source && existsSync(join(job.workspace, meta.avatar.source)));
   res.json({
     jobId: job.id,
-    layout: { ok: layout.every((item) => item.reserved), chapters: layout },
+    layout: { ok: !meta.avatar?.enabled || (layout.length > 0 && layout.every((item) => item.reserved)), chapters: layout },
     audio: { ok: existsSync(audioRoot) && countAudio(audioRoot) > 0, segments: existsSync(audioRoot) ? countAudio(audioRoot) : 0 },
-    avatar: { enabled: Boolean(meta.avatar?.enabled), sourceExists, outputExists: existsSync(avatarFile), service: await heygemHealth() },
+    subtitle: { enabled: meta.subtitle?.enabled !== false, ok: meta.subtitle?.enabled === false || existsSync(subtitleFile), preset: meta.subtitle?.preset || "auto-contrast", position: meta.subtitle?.position || "bottom" },
+    avatar: {
+      enabled: Boolean(meta.avatar?.enabled),
+      sourceExists,
+      outputExists: existsSync(avatarFile),
+      previews: existsSync(avatarPreviewDir) ? readdirSync(avatarPreviewDir).filter((name) => name.endsWith(".mp4")).length : 0,
+      service: await heygemHealth(),
+    },
+    render: { ok: existsSync(outputFile), outputExists: existsSync(outputFile) },
     dialogue: { total: db.prepare("SELECT COUNT(*) AS count FROM feedback WHERE job_id = ?").get(job.id).count },
   });
 });
@@ -673,12 +717,55 @@ api.get("/jobs/:id/avatar/previews/:name", (req, res) => {
 api.post("/jobs/:id/approve", (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "not found" });
+  if (job.stage === "gate_source") {
+    const source = join(job.workspace, "article.md");
+    if (!existsSync(source) || readFileSync(source, "utf8").trim().length < 200) {
+      return res.status(409).json({ error: "原文内容不足 200 字，请先补充完整再继续" });
+    }
+  }
+  if (job.stage === "gate_script" && !existsSync(join(job.workspace, "script.md"))) {
+    return res.status(409).json({ error: "口播稿文件还没有生成完成" });
+  }
+  if (job.stage === "gate_style") {
+    let meta = {};
+    try { meta = JSON.parse(job.meta || "{}"); } catch {}
+    updateJob(job.id, { meta: JSON.stringify({
+      ...meta,
+      theme: meta.theme || config.theme,
+      typography: { fontSize: "large", density: "balanced", ...(meta.typography || {}) },
+      subtitle: { enabled: true, preset: "auto-contrast", position: "bottom", ...(meta.subtitle || {}) },
+      avatar: { enabled: false, position: "right-third", ...(meta.avatar || {}) },
+    }) });
+  }
   if (job.stage === "gate_chapters") {
     const generation = chapterGeneration(job);
     const pending = generation.chapters.filter((chapter) => chapter.status !== "approved");
     if (!generation.chapters.length || pending.length) {
       return res.status(409).json({ error: `请先逐章确认画面，还有 ${pending.length || generation.expected || 1} 章未确认` });
     }
+  }
+  const pres = join(job.workspace, "presentation");
+  if (job.stage === "gate_audio") {
+    const audioRoot = join(pres, "public", "audio");
+    const count = existsSync(audioRoot) ? readdirSync(audioRoot, { recursive: true }).filter((name) => String(name).endsWith(".mp3")).length : 0;
+    if (!count) return res.status(409).json({ error: "没有检测到配音文件，请先重试配音生成" });
+  }
+  if (job.stage === "gate_subtitles") {
+    let meta = {};
+    try { meta = JSON.parse(job.meta || "{}"); } catch {}
+    if (meta.subtitle?.enabled !== false && !existsSync(join(pres, "src", "registry", "subtitleCues.ts"))) {
+      return res.status(409).json({ error: "字幕时间轴尚未生成完成" });
+    }
+  }
+  if (job.stage === "gate_avatar") {
+    let meta = {};
+    try { meta = JSON.parse(job.meta || "{}"); } catch {}
+    if (meta.avatar?.enabled && !existsSync(join(pres, "public", "avatar", "lipsync.mp4"))) {
+      return res.status(409).json({ error: "数字人视频尚未生成完成" });
+    }
+  }
+  if (job.stage === "gate_render" && !existsSync(join(pres, "package.json"))) {
+    return res.status(409).json({ error: "画面工程不完整，暂时不能生成成片" });
   }
   res.json({ ok: approveGate(job.id) });
 });
@@ -711,7 +798,7 @@ api.post("/jobs/:id/feedback", async (req, res) => {
   if (!job) return res.status(404).json({ error: "not found" });
   const { chapter, message, phase } = req.body ?? {};
   if (!message) return res.status(400).json({ error: "message required" });
-  const feedbackPhases = ["文案确认", "口播稿审阅", "逐页生成", "配音字幕", "数字人"];
+  const feedbackPhases = ["原文确认", "文案确认", "口播稿审阅", "逐页生成", "配音字幕", "数字人"];
   if (!feedbackPhases.includes(phase)) {
     return res.status(409).json({ error: "当前环节不支持对话修改" });
   }
@@ -775,14 +862,14 @@ api.post("/jobs/:id/devserver/start", async (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "not found" });
   try {
-    res.json(await startDevServer(job.id, job.workspace));
+    res.json(await startPreview(job));
   } catch (err) {
     res.status(409).json({ error: err.message });
   }
 });
 
 api.post("/jobs/:id/devserver/stop", (req, res) => {
-  res.json(stopDevServer(Number(req.params.id)));
+  res.json(stopPreview(Number(req.params.id)));
 });
 
 // ---- 服务端成片（无头浏览器 + ffmpeg） ------------------------------------------

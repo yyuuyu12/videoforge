@@ -1,5 +1,6 @@
 import { db, getJob, logEvent, updateJob } from "../db.js";
 import { nextStage, runStage, stageDef } from "../stages.js";
+import { buildPresentation } from "../preview.js";
 
 /**
  * DB-backed job runner. Picks queued jobs, runs their current stage,
@@ -20,7 +21,7 @@ async function advance(jobId) {
 
       const def = stageDef(job.stage);
       if (!def) {
-        updateJob(jobId, { status: "failed" });
+        updateJob(jobId, { status: "failed", error: "无法识别当前制作步骤，请重试或检查版本" });
         logEvent(jobId, job.stage, "unknown stage", "error");
         break;
       }
@@ -41,12 +42,22 @@ async function advance(jobId) {
       const secs = Math.round((Date.now() - t0) / 1000);
 
       if (!result.ok) {
-        updateJob(jobId, { status: "failed" });
+        updateJob(jobId, { status: "failed", error: result.note || "当前步骤没有完成" });
         logEvent(jobId, job.stage, `stage FAILED after ${secs}s${result.note ? `: ${result.note}` : ""}`, "error");
         break;
       }
+      if (job.stage === "chapter_gen") {
+        try {
+          await buildPresentation(getJob(jobId));
+        } catch (error) {
+          result = { ok: false, note: `画面构建未通过，尚未进入验收：${error.message}` };
+          updateJob(jobId, { status: "failed", error: result.note });
+          logEvent(jobId, job.stage, `stage FAILED after ${secs}s: ${result.note}`, "error");
+          break;
+        }
+      }
       logEvent(jobId, job.stage, `stage ok (${secs}s)${result.note ? `\n${result.note}` : ""}`);
-      updateJob(jobId, { stage: nextStage(job.stage) });
+      updateJob(jobId, { stage: nextStage(job.stage), error: null });
     }
   } finally {
     inFlight.delete(jobId);
@@ -76,7 +87,7 @@ export function startPipelineWorker() {
 export function approveGate(jobId) {
   const job = getJob(jobId);
   if (!job || job.status !== "waiting_approval") return false;
-  updateJob(jobId, { stage: nextStage(job.stage), status: "queued" });
+  updateJob(jobId, { stage: nextStage(job.stage), status: "queued", error: null });
   logEvent(jobId, job.stage, "审批通过");
   return true;
 }
@@ -87,7 +98,7 @@ export function retryJob(jobId, stage) {
   if (!job) return false;
   const targetStage = stage ?? job.stage;
   if (["queued", "running"].includes(job.status) && targetStage === job.stage) return true;
-  updateJob(jobId, { ...(stage ? { stage } : {}), status: "queued" });
+  updateJob(jobId, { ...(stage ? { stage } : {}), status: "queued", error: null });
   logEvent(jobId, targetStage, "手动重试");
   return true;
 }

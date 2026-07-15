@@ -3,7 +3,9 @@ dist/
 settings.local.json
 config.json
 data.db
-workspaces/
+workspaces/*
+!workspaces/package.json
+!workspaces/package-lock.json
 *.log
 .playwright-cli/
 *.tsbuildinfo

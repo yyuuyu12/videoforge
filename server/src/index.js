@@ -7,10 +7,12 @@ import { startPipelineWorker } from "./workers/pipeline.js";
 import { startDiscoveryWorker } from "./workers/discovery.js";
 import { stopAllDevServers } from "./devServers.js";
 import { startExtractionWorker } from "./workers/extractions.js";
+import { servePreview } from "./preview.js";
 
 const app = express();
 // 30mb: voice-clone samples (≤20MB per MiniMax) travel as base64 JSON.
 app.use(express.json({ limit: "250mb" }));
+app.use("/preview/:id", servePreview);
 app.use("/api", api);
 
 // Serve the built dashboard in production; in dev, Vite proxies /api here.
@@ -20,8 +22,8 @@ if (existsSync(dist)) {
   app.get(/^\/(?!api).*/, (_req, res) => res.sendFile(join(dist, "index.html")));
 }
 
-app.listen(config.port, () => {
-  console.log(`videoforge server → http://localhost:${config.port}`);
+app.listen(config.port, config.host, () => {
+  console.log(`videoforge server → http://${config.host}:${config.port}`);
 });
 
 startPipelineWorker();

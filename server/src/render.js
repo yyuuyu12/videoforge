@@ -3,7 +3,7 @@ import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from "node:
 import { join, relative } from "node:path";
 import { chromium } from "playwright-core";
 import { logEvent } from "./db.js";
-import { startDevServer } from "./devServers.js";
+import { preparePreview } from "./preview.js";
 
 /**
  * 服务端一键成片：无头 Chromium 以 ?auto=1 真实播放整片，
@@ -63,6 +63,41 @@ async function launchBrowser() {
   throw new Error(`没有可用的 Chrome/Edge 浏览器（${errors.join("; ")}）`);
 }
 
+/**
+ * Refresh the work-list cover from the current interactive presentation.
+ * This is called after late visual stages (especially avatar wiring), so the
+ * cover represents what the user can currently preview instead of the early
+ * chapter-generation snapshot.
+ */
+export async function captureJobCover(job, { requireAvatar = false } = {}) {
+  const presDir = join(job.workspace, "presentation");
+  if (!existsSync(join(presDir, "package.json"))) throw new Error("presentation has not been generated");
+
+  const previewUrl = await preparePreview(job);
+  const browser = await launchBrowser();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+    await page.goto(previewUrl, { waitUntil: "networkidle", timeout: 60000 });
+    await page.evaluate(() => document.fonts.ready);
+
+    if (requireAvatar) {
+      await page.waitForFunction(() => {
+        const video = document.querySelector(".avatar-presenter video");
+        return video instanceof HTMLVideoElement && video.readyState >= 2 && video.videoWidth > 0;
+      }, null, { timeout: 30000 });
+    }
+
+    await page.waitForTimeout(1000);
+    const cover = join(presDir, "public", "cover.png");
+    mkdirSync(join(presDir, "public"), { recursive: true });
+    await page.screenshot({ path: cover, type: "png" });
+    logEvent(job.id, "cover", requireAvatar ? "作品封面已更新为数字人合成预览" : "作品封面已按最新预览更新");
+    return cover;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
 export async function renderJob(job) {
   const presDir = join(job.workspace, "presentation");
   if (!existsSync(join(presDir, "package.json"))) throw new Error("presentation 尚未生成");
@@ -73,9 +108,8 @@ export async function renderJob(job) {
   if (!segments.length) throw new Error("没有配音文件，无法确定成片时间轴");
   let totalAudioSec = 0;
   for (const file of segments) totalAudioSec += await mediaDuration(file);
-
   progress(job.id, 8, "启动预览服务");
-  const { port } = await startDevServer(job.id, job.workspace);
+  const previewUrl = await preparePreview(job);
 
   progress(job.id, 14, "启动无头浏览器");
   const browser = await launchBrowser();
@@ -101,9 +135,9 @@ export async function renderJob(job) {
       };
     });
     const page = await context.newPage();
-    await page.goto(`http://127.0.0.1:${port}/?auto=1`, { waitUntil: "load", timeout: 60000 });
+    await page.goto(`${previewUrl}?auto=1`, { waitUntil: "load", timeout: 60000 });
     await page.evaluate(() => document.fonts.ready);
-    await page.waitForTimeout(1500); // 让 Vite 按需编译和首屏动画就位
+    await page.waitForTimeout(500); // 静态产物无需等待 Vite 按需编译，仅留首屏动画缓冲
 
     const frames = [];
     const cdp = await context.newCDPSession(page);
@@ -196,7 +230,10 @@ export async function renderJob(job) {
     const placements = [];
     for (const ev of audioEvents) {
       if (ev.ev !== "playing" || !ev.src.includes("/audio/")) continue;
-      const rel = decodeURIComponent(new URL(ev.src).pathname).replace(/^\//, "");
+      const pathname = decodeURIComponent(new URL(ev.src).pathname);
+      const audioIndex = pathname.indexOf("/audio/");
+      if (audioIndex < 0) continue;
+      const rel = pathname.slice(audioIndex + 1);
       const file = join(presDir, "public", rel);
       if (!existsSync(file)) continue;
       placements.push({ file, offsetMs: Math.max(0, Math.round(ev.at - t0 * 1000)) });
@@ -213,8 +250,15 @@ export async function renderJob(job) {
     chains.push(`${mixInputs}amix=inputs=${placements.length}:normalize=0:duration=longest,apad[mix]`);
     const output = join(job.workspace, "output.mp4");
     const mux = await run("ffmpeg", [...args, "-filter_complex", chains.join(";"),
+      // Presentation frames already contain the time-synchronized AvatarPresenter.
+      // Do not overlay lipsync.mp4 here or the finished video shows two presenters.
       "-map", "0:v", "-map", "[mix]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-shortest", output], tmpDir);
     if (!mux.ok) throw new Error(`混音合成失败：${mux.output.slice(-400)}`);
+
+    const cover = join(presDir, "public", "cover.png");
+    const coverFrame = await run("ffmpeg", ["-y", "-ss", "2", "-i", output, "-frames:v", "1", cover], tmpDir);
+    if (coverFrame.ok) logEvent(job.id, "cover", "作品封面已更新为最新成片画面");
+    else logEvent(job.id, "cover", `成片已完成，但封面帧提取失败：${coverFrame.output.slice(-300)}`, "warning");
 
     const finalDur = await mediaDuration(output);
     writeFileSync(join(job.workspace, "render-meta.json"), JSON.stringify({

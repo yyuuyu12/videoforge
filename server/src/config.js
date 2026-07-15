@@ -7,6 +7,7 @@ export const ROOT = join(__dirname, "..", "..");
 
 const DEFAULTS = {
   port: 5401,
+  host: "127.0.0.1",
   workspacesRoot: join(ROOT, "workspaces"),
   theme: "midnight-press",
   agent: {
@@ -30,6 +31,7 @@ const DEFAULTS = {
     speed: 1.12,
   },
   devServerBasePort: 5300,
+  previewMode: "static",
   discovery: { intervalMinutes: 120, autoStart: true },
 };
 

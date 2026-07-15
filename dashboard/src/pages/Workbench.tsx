@@ -3,11 +3,12 @@ import {
   api,
   type AvatarAsset,
   type AvatarPreview,
+  type JobAudit,
   type JobDetail,
 } from "../api";
 
 const phases = [
-  "文案确认",
+  "原文确认",
   "口播稿审阅",
   "选择风格",
   "逐页生成",
@@ -25,7 +26,7 @@ const phaseSubs = [
   "带声音完整播放",
 ];
 const conversationalPhases = new Set([
-  "文案确认",
+  "原文确认",
   "口播稿审阅",
   "逐页生成",
   "配音字幕",
@@ -39,10 +40,10 @@ const themes = [
     tone: "dark",
   },
   {
-    id: "warm-editorial",
-    name: "暖调叙事",
-    desc: "纸张质感与柔和留白",
-    tone: "warm",
+    id: "swiss-ikb",
+    name: "瑞士蓝印",
+    desc: "理性网格与强信息层级",
+    tone: "light",
   },
   {
     id: "newsroom",
@@ -51,13 +52,14 @@ const themes = [
     tone: "news",
   },
   {
-    id: "minimal",
-    name: "极简讲解",
-    desc: "克制排版，突出观点",
-    tone: "light",
+    id: "bold-signal",
+    name: "强信号",
+    desc: "高冲击标题与清晰重点",
+    tone: "warm",
   },
 ];
 const stageProgress: Record<string, string> = {
+  gate_source: "等待你确认原始内容",
   script_outline: "正在生成口播稿和画面规划",
   scaffold: "风格已确认，正在创建画面工程（通常需要 10–30 秒）",
   chapter_gen: "正在逐页生成并检查画面",
@@ -66,6 +68,36 @@ const stageProgress: Record<string, string> = {
   avatar_gen: "正在调用数字人模型并进行口型同步",
   render: "正在准备成片",
 };
+
+type RetryImpact = {
+  label: string;
+  redo: string;
+  keep: string;
+  next: string;
+};
+
+const retryImpacts: Record<string, RetryImpact> = {
+  gate_source: { label: "原文确认", redo: "从原文确认重新开始，并重新生成后续内容", keep: "保留原始文章", next: "重新生成口播稿" },
+  script_outline: { label: "口播稿生成", redo: "重新生成口播稿和画面规划", keep: "保留原文", next: "回到口播稿验收" },
+  gate_script: { label: "口播稿确认", redo: "重新确认或修改口播稿", keep: "保留原文和当前稿件", next: "确认后重新检查后续画面" },
+  gate_style: { label: "风格选择", redo: "重新选择风格，并从画面工程开始更新", keep: "保留原文和口播稿", next: "重新生成 PPT 画面" },
+  scaffold: { label: "画面框架", redo: "重新创建 PPT 画面框架", keep: "保留原文、口播稿和风格选择", next: "继续逐章生成画面" },
+  chapter_gen: { label: "PPT 画面", redo: "从未完成的章节继续生成并检查", keep: "保留已完成章节和前序内容", next: "回到逐章画面验收" },
+  gate_chapters: { label: "画面验收", redo: "继续验收或修改当前 PPT 画面", keep: "保留已生成的全部章节", next: "确认后进入配音" },
+  audio_synth: { label: "配音", redo: "重新检查并生成缺失的配音", keep: "保留原文、稿件和 PPT 画面", next: "重新试听配音" },
+  gate_audio: { label: "配音验收", redo: "重新试听或修改配音", keep: "保留 PPT 和已生成配音", next: "确认后生成字幕" },
+  subtitle_cues: { label: "字幕", redo: "重新生成并检查字幕时间轴", keep: "保留 PPT 和配音", next: "重新预览字幕" },
+  gate_subtitles: { label: "字幕验收", redo: "重新检查或调整字幕", keep: "保留 PPT、配音和当前字幕", next: "确认后进入数字人" },
+  avatar_gen: { label: "数字人", redo: "重新生成口型并接入现有 PPT", keep: "保留原文、稿件、PPT、配音和字幕", next: "重新逐章预览数字人" },
+  gate_avatar: { label: "数字人验收", redo: "重新检查或更换数字人；更换后只重做口型与接线", keep: "保留数字人之前的全部内容", next: "确认后进入导出" },
+  gate_render: { label: "导出确认", redo: "重新检查完整预览", keep: "保留 PPT、配音、字幕和数字人", next: "确认后生成 MP4" },
+  render: { label: "成片导出", redo: "重新录制画面并混合声音，覆盖旧 MP4", keep: "保留 PPT、配音、字幕和数字人，不重新生成素材", next: "完成后可下载新成片" },
+  done: { label: "成片导出", redo: "仅重新录制并导出 MP4", keep: "保留 PPT、配音、字幕和数字人，不返回前面环节", next: "覆盖旧成片并更新封面" },
+};
+
+function retryImpact(stage: string): RetryImpact {
+  return retryImpacts[stage] || { label: "当前环节", redo: "从当前失败位置继续处理", keep: "保留已经完成且仍有效的内容", next: "完成后回到当前环节验收" };
+}
 function parseMeta(job: JobDetail) {
   try {
     return JSON.parse(job.meta || "{}");
@@ -74,12 +106,12 @@ function parseMeta(job: JobDetail) {
   }
 }
 function phaseIndex(job: JobDetail) {
-  if (job.stage === "script_outline") return 0;
-  if (job.stage === "gate_script") return 1;
+  if (job.stage === "gate_source") return 0;
+  if (["script_outline", "gate_script"].includes(job.stage)) return 1;
   if (["gate_style", "scaffold"].includes(job.stage)) return 2;
   if (["chapter_gen", "gate_chapters"].includes(job.stage)) return 3;
-  if (["audio_synth", "subtitle_cues"].includes(job.stage)) return 4;
-  if (job.stage === "avatar_gen") return 5;
+  if (["audio_synth", "gate_audio", "subtitle_cues", "gate_subtitles"].includes(job.stage)) return 4;
+  if (["avatar_gen", "gate_avatar"].includes(job.stage)) return 5;
   return 6;
 }
 
@@ -123,6 +155,7 @@ export function Workbench({
   const [files, setFiles] = useState<Record<string, string | null>>({});
   const [assets, setAssets] = useState<AvatarAsset[]>([]);
   const [avatarPreviews, setAvatarPreviews] = useState<AvatarPreview[]>([]);
+  const [audit, setAudit] = useState<JobAudit | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
   const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({});
@@ -131,6 +164,8 @@ export function Workbench({
   const [avatarState, setAvatarState] = useState("");
   const [regenerateState, setRegenerateState] = useState("");
   const [previewError, setPreviewError] = useState("");
+  const [previewRevision, setPreviewRevision] = useState(0);
+  const [renderConfirmOpen, setRenderConfirmOpen] = useState(false);
   const lastCurrent = useRef<number | null>(null);
   const load = () =>
     api
@@ -161,6 +196,13 @@ export function Workbench({
       .avatarPreviews(jobId)
       .then(setAvatarPreviews)
       .catch(() => {});
+  }, [jobId, job?.stage, job?.status]);
+  useEffect(() => {
+    if (!job || !["gate_chapters", "audio_synth", "gate_audio", "subtitle_cues", "gate_subtitles", "avatar_gen", "gate_avatar", "gate_render", "render", "done"].includes(job.stage)) return;
+    const loadAudit = () => api.audit(jobId).then(setAudit).catch(() => {});
+    void loadAudit();
+    const timer = window.setInterval(loadAudit, 5000);
+    return () => window.clearInterval(timer);
   }, [jobId, job?.stage, job?.status]);
   useEffect(() => {
     if (!job) return;
@@ -218,17 +260,16 @@ export function Workbench({
     }
   };
   const ensurePreview = async () => {
-    if (!job.devServer.running) {
-      setBusy(true);
-      setPreviewError("");
-      try {
-        await api.devStart(job.id);
-        await load();
-      } catch (error) {
-        setPreviewError(error instanceof Error ? error.message : "预览服务启动失败");
-      } finally {
-        setBusy(false);
-      }
+    setBusy(true);
+    setPreviewError("");
+    try {
+      await api.devStart(job.id);
+      await load();
+      setPreviewRevision((value) => value + 1);
+    } catch (error) {
+      setPreviewError(error instanceof Error ? error.message : "预览构建失败");
+    } finally {
+      setBusy(false);
     }
   };
   const saveOptions = async (patch: unknown) => {
@@ -246,6 +287,7 @@ export function Workbench({
     setPreviewError("");
     try {
       await api.startRender(job.id);
+      setRenderConfirmOpen(false);
       await load();
     } catch (error) {
       setPreviewError(error instanceof Error ? error.message : "渲染启动失败");
@@ -257,6 +299,7 @@ export function Workbench({
     (event) => event.stage === "render" && event.message.startsWith("progress|"),
   );
   const renderProgressParts = renderProgressEvent?.message.split("|") ?? [];
+  const failedRetryImpact = retryImpact(job.stage);
   const regenerate = async () => {
     if (busy) return;
     setBusy(true);
@@ -312,13 +355,66 @@ export function Workbench({
       setBusy(false);
     }
   };
+  const selectAvatar = async (asset: AvatarAsset) => {
+    setBusy(true);
+    setAvatarState(`正在切换为“${asset.name}”…`);
+    try {
+      await api.selectAvatarAsset(job.id, asset.id);
+      setAvatarState(`已选择“${asset.name}”。需要重新生成口型，之前的数字人预览不会作为新结果使用。`);
+      await load();
+    } catch (error) {
+      setAvatarState(`切换失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const generateAvatar = async () => {
+    setBusy(true);
+    setAvatarState("正在检查数字人服务…");
+    try {
+      await api.generateAvatar(job.id);
+      setAvatarState("数字人任务已提交，正在准备口型生成…");
+      await load();
+    } catch (error) {
+      setAvatarState(error instanceof Error ? `暂时无法生成：${error.message}` : "暂时无法生成，请检查数字人服务。");
+    } finally {
+      setBusy(false);
+    }
+  };
   const content = (() => {
     if (selected === 0)
       return (
         <>
-          <p className="vf-kicker">文案确认</p>
-          <h2>原始内容</h2>
+          <p className="vf-kicker">原文确认</p>
+          <h2>先确认原始内容</h2>
+          <p>这里不会自动生成。检查标题、事实和内容完整性，确认后才进入口播稿生成。</p>
+          <div className="vf-validation-strip">
+            <span className={files["article.md"] ? "ok" : "pending"} />
+            <b>{files["article.md"] ? "原文已载入" : "正在读取原文"}</b>
+            <small>{files["article.md"] ? `约 ${files["article.md"]!.length} 字符` : "请稍候"}</small>
+          </div>
           {textView(files["article.md"], "正在读取原始内容…")}
+          {job.stage === "gate_source" && (
+            <div className="vf-step-actionbar">
+              <div><b>原文检查完成了吗？</b><span>也可以先在右侧对话中提出修改，再确认进入下一步。</span></div>
+              <button
+                className="vf-primary"
+                disabled={busy || !files["article.md"]}
+                onClick={async () => {
+                  setBusy(true);
+                  try {
+                    await api.approve(job.id);
+                    setSelected(1);
+                    await load();
+                  } finally {
+                    setBusy(false);
+                  }
+                }}
+              >
+                {busy ? "正在进入下一步…" : "确认原文，生成口播稿"}
+              </button>
+            </div>
+          )}
         </>
       );
     if (selected === 1)
@@ -326,10 +422,15 @@ export function Workbench({
         <>
           <p className="vf-kicker">口播稿审阅</p>
           <h2>生成的口播稿</h2>
-          {textView(files["script.md"], "口播稿尚未生成。")}
+          {job.stage === "script_outline" && ["queued", "running"].includes(job.status) ? (
+            <div className="vf-next-stage-loading" role="status">
+              <span className="vf-loading-ring" />
+              <div><b>{activeProgressText}</b><p>原文已经确认。现在生成口播稿和画面规划，完成后会停在本页等待审阅。</p></div>
+            </div>
+          ) : textView(files["script.md"], "口播稿尚未生成。")}
           {job.stage === "gate_script" && (
-            <div className="vf-stage-actions">
-              <button
+            <div className="vf-step-actionbar">
+              <button className="vf-secondary"
                 onClick={() => api.retry(job.id, "script_outline").then(load)}
               >
                 换个写法
@@ -342,7 +443,7 @@ export function Workbench({
                   await load();
                 }}
               >
-                这版可以，继续
+                确认口播稿，选择风格
               </button>
             </div>
           )}
@@ -373,6 +474,32 @@ export function Workbench({
               </button>
             ))}
           </div>
+          <section className="vf-option-panel">
+            <div className="vf-option-heading"><div><h3>文字与排版</h3><p>先用作品级预设控制字号和页面信息量，不改底层 Skill。</p></div></div>
+            <div className="vf-option-row">
+              <span>文字大小</span>
+              <div className="vf-segments">
+                {[["compact", "紧凑"], ["large", "大字（推荐）"], ["extra-large", "超大字"]].map(([value, label]) => (
+                  <button key={value} disabled={!styleEditable || busy} className={(meta.typography?.fontSize || "large") === value ? "selected" : ""} onClick={() => saveOptions({ typography: { ...(meta.typography || {}), fontSize: value } })}>{label}</button>
+                ))}
+              </div>
+            </div>
+            <div className="vf-option-row">
+              <span>排版密度</span>
+              <div className="vf-segments">
+                {[["airy", "留白多"], ["balanced", "均衡（推荐）"], ["dense", "信息密集"]].map(([value, label]) => (
+                  <button key={value} disabled={!styleEditable || busy} className={(meta.typography?.density || "balanced") === value ? "selected" : ""} onClick={() => saveOptions({ typography: { ...(meta.typography || {}), density: value } })}>{label}</button>
+                ))}
+              </div>
+            </div>
+          </section>
+          <section className="vf-option-panel">
+            <div className="vf-option-heading"><div><h3>字幕预设</h3><p>深色主题自动使用浅色字幕，浅色主题自动使用深色字幕。</p></div><label className="vf-switch"><input type="checkbox" disabled={!styleEditable || busy} checked={meta.subtitle?.enabled !== false} onChange={(event) => saveOptions({ subtitle: { ...(meta.subtitle || {}), enabled: event.target.checked } })} /><span /></label></div>
+            {meta.subtitle?.enabled !== false && <>
+              <div className="vf-option-row"><span>字幕样式</span><div className="vf-segments">{[["auto-contrast", "自动高对比"], ["soft-panel", "柔和底板"], ["outline", "描边字幕"]].map(([value, label]) => <button key={value} disabled={!styleEditable || busy} className={(meta.subtitle?.preset || "auto-contrast") === value ? "selected" : ""} onClick={() => saveOptions({ subtitle: { ...(meta.subtitle || {}), enabled: true, preset: value } })}>{label}</button>)}</div></div>
+              <div className="vf-option-row"><span>字幕位置</span><div className="vf-segments">{[["bottom", "底部"], ["lower-third", "下三分之一"], ["top", "顶部"]].map(([value, label]) => <button key={value} disabled={!styleEditable || busy} className={(meta.subtitle?.position || "bottom") === value ? "selected" : ""} onClick={() => saveOptions({ subtitle: { ...(meta.subtitle || {}), enabled: true, position: value } })}>{label}</button>)}</div></div>
+            </>}
+          </section>
           <section className="vf-avatar-config">
             <h3>是否加入你的形象</h3>
             <div className="vf-segments">
@@ -449,7 +576,7 @@ export function Workbench({
             <div className="vf-style-confirm">
               <div>
                 <b>风格和人物占位确认完成后，才会开始生成画面</b>
-                <span>当前选择：{themes.find((theme) => theme.id === (meta.theme || "midnight-press"))?.name || "午夜刊物"} · {meta.avatar?.enabled ? "使用数字人" : "不使用数字人"}</span>
+                <span>当前选择：{themes.find((theme) => theme.id === (meta.theme || "midnight-press"))?.name || "午夜刊物"} · {(meta.typography?.fontSize || "large") === "extra-large" ? "超大字" : (meta.typography?.fontSize || "large") === "compact" ? "紧凑字级" : "大字"} · {meta.subtitle?.enabled === false ? "无字幕" : "使用字幕"} · {meta.avatar?.enabled ? "使用数字人" : "不使用数字人"}</span>
               </div>
               <button
                 className="vf-primary"
@@ -569,12 +696,12 @@ export function Workbench({
           </section>
           {activeChapter && (
             <div className="vf-chapter-focus">
-              <span>当前调试章节</span>
-              <b>{activeChapter.index}. {activeChapter.title}</b>
+              <div><span>当前校验章节</span><b>{activeChapter.index}. {activeChapter.title}</b><small>{activeChapter.ready ? `${activeChapter.steps} 个画面步骤已生成` : "仍在生成，请稍候"}</small></div>
+              <div className="vf-check-chips"><span className={activeChapter.ready ? "ok" : "pending"}>内容文件</span><span className={previewUrl ? "ok" : "pending"}>可预览</span><span className={activeChapter.status === "approved" ? "ok" : "pending"}>已确认</span></div>
               {job.stage === "gate_chapters" && activeChapter.ready && activeChapter.status !== "approved" && (
                 <button
                   className="vf-primary"
-                  disabled={busy}
+                  disabled={busy || !previewUrl}
                   onClick={async () => {
                     setBusy(true);
                     try {
@@ -585,13 +712,14 @@ export function Workbench({
                     }
                   }}
                 >
-                  {busy ? "正在确认…" : "本章画面通过"}
+                  {busy ? "正在确认…" : previewUrl ? "预览无误，本章通过" : "先加载预览"}
                 </button>
               )}
             </div>
           )}
           {previewUrl ? (
             <iframe
+              key={`chapters-${previewRevision}`}
               className="vf-live-preview"
               title="作品预览"
               src={previewUrl}
@@ -635,26 +763,50 @@ export function Workbench({
         <>
           <p className="vf-kicker">配音字幕</p>
           <h2>声音与字幕时间轴</h2>
+          <section className="vf-sync-preview">
+            <div className="vf-sync-preview-head">
+              <div>
+                <b>画面、配音与字幕同步预览</b>
+                <span>点击画面播放器的播放按钮，检查字幕是否跟随真实配音时间轴。</span>
+              </div>
+              <span className="vf-sync-preview-status">{previewUrl ? "预览已加载" : "等待预览服务"}</span>
+            </div>
+            {previewUrl ? (
+              <iframe
+                key={`audio-${previewRevision}`}
+                className="vf-live-preview vf-sync-preview-frame"
+                title="配音字幕同步预览"
+                src={previewUrl}
+                allow="autoplay; fullscreen"
+              />
+            ) : (
+              <div className="vf-preview vf-sync-preview-empty">
+                <b>VideoForge</b>
+                <span>先点击下方“加载预览”</span>
+              </div>
+            )}
+          </section>
           <div className="vf-result-grid">
             <section>
               <b>配音</b>
-              <strong>配音片段已保留</strong>
-              <span>完整播放时自动连续播放</span>
+              <strong>{audit?.audio.ok ? `${audit.audio.segments} 段配音已校验` : "正在校验配音文件"}</strong>
+              <span>{audit?.audio.ok ? "文件存在，可进入带声音预览" : "等待音频生成完成"}</span>
             </section>
             <section>
               <b>字幕</b>
-              <strong>逐字字幕已生成</strong>
-              <span>跟随真实音频时间轴</span>
+              <strong>{audit?.subtitle.enabled === false ? "本作品未启用字幕" : audit?.subtitle.ok ? "字幕时间轴已校验" : "正在校验字幕"}</strong>
+              <span>{audit?.subtitle.enabled === false ? "可在风格设置中重新开启" : "跟随真实音频时间轴"}</span>
             </section>
           </div>
-          {previewUrl && (
-            <button
-              className="vf-primary"
-              onClick={() => window.open(`${previewUrl}?auto=1`, "_blank")}
-            >
-              播放带声音预览
-            </button>
-          )}
+          <div className="vf-step-actionbar">
+            <div><b>{job.stage === "gate_audio" ? "先试听配音，再生成字幕" : "检查字幕后，再进入数字人"}</b><span>右侧对话可调整某段配音，或修改字幕样式和位置。修改完成后重新播放确认。</span></div>
+            <div className="vf-action-cluster">
+              <button className="vf-secondary" onClick={ensurePreview}>{previewUrl ? "刷新预览" : "加载预览"}</button>
+              <button className="vf-secondary" disabled={!previewUrl || !audit?.audio.ok} onClick={() => window.open(`${previewUrl}?auto=1`, "_blank")}>播放带声音预览</button>
+              {job.stage === "gate_audio" && <button className="vf-primary" disabled={busy || !audit?.audio.ok} onClick={() => api.approve(job.id).then(load)}>配音通过，生成字幕</button>}
+              {job.stage === "gate_subtitles" && <button className="vf-primary" disabled={busy || !audit?.subtitle.ok} onClick={() => api.approve(job.id).then(load)}>字幕通过，进入数字人</button>}
+            </div>
+          </div>
         </>
       );
     if (selected === 5)
@@ -677,13 +829,24 @@ export function Workbench({
                 <span>完成后会自动生成按章节拆分的预览视频。</span>
               </div>
             )}
+          {(() => {
+            const avatarNeedsRegeneration = Boolean(meta.avatar?.pendingRegeneration)
+              || (job.stage === "avatar_gen" && job.status === "failed");
+            return <>
+          {avatarNeedsRegeneration && (
+            <div className="vf-regenerate vf-avatar-recovery" role="status">
+              <b>已选择新形象，等待重新生成口型</b>
+              <span>从“数字人”环节重新开始：复用现有 PPT、配音和字幕，只重新生成口型视频并接入画面。完成后需要重新验收数字人，再重新导出成片。</span>
+            </div>
+          )}
           <section className="vf-avatar-composite">
             <h3>数字人与画面合成预览</h3>
             <p>
               直接在当前环节检查人物占位、口型、声音和逐页画面，不需要返回“逐页生成”。
             </p>
-            {previewUrl ? (
+            {previewUrl && !avatarNeedsRegeneration ? (
               <iframe
+                key={`avatar-${previewRevision}`}
                 className="vf-live-preview"
                 title="数字人合成预览"
                 src={`${previewUrl}?auto=1`}
@@ -692,14 +855,14 @@ export function Workbench({
             ) : (
               <div className="vf-preview">
                 <b>VideoForge</b>
-                <span>点击下方加载合成预览</span>
+                <span>{avatarNeedsRegeneration ? "新的数字人生成完成后可在这里预览" : "点击下方加载合成预览"}</span>
               </div>
             )}
             <div className="vf-stage-actions">
               <button onClick={ensurePreview}>
                 {busy ? "正在启动…" : "加载合成预览"}
               </button>
-              {previewUrl && (
+              {previewUrl && !avatarNeedsRegeneration && (
                 <a
                   className="vf-action-link vf-play-action"
                   href={`${previewUrl}?auto=1`}
@@ -722,10 +885,8 @@ export function Workbench({
                   className={
                     String(meta.avatar?.assetId) === asset.id ? "selected" : ""
                   }
-                  onClick={async () => {
-                    await api.selectAvatarAsset(job.id, asset.id);
-                    await load();
-                  }}
+                  disabled={busy}
+                  onClick={() => void selectAvatar(asset)}
                 >
                   <video src={asset.url} muted playsInline preload="metadata" />
                   <b>{asset.name}</b>
@@ -738,6 +899,11 @@ export function Workbench({
               ))}
             </div>
           )}
+          <div className="vf-operation-impact">
+            <b>重新生成数字人会影响什么？</b>
+            <small><strong>复用：</strong>原文、口播稿、PPT 画面、配音、字幕</small>
+            <small><strong>重做：</strong>数字人口型视频、逐章合成预览；之后需要重新导出 MP4</small>
+          </div>
           <div className="vf-avatar-actions">
             <label className="vf-upload-button">
               <input
@@ -754,30 +920,14 @@ export function Workbench({
             {meta.avatar?.filename && (
               <button
                 className="vf-primary"
-                disabled={
-                  job.stage === "avatar_gen" &&
-                  ["queued", "running"].includes(job.status)
-                }
-                onClick={async () => {
-                  setAvatarState("正在提交数字人对口型任务…");
-                  try {
-                    await api.generateAvatar(job.id);
-                    setAvatarState("任务已提交，正在检查 HeyGem 服务…");
-                    await load();
-                  } catch (error) {
-                    setAvatarState(
-                      error instanceof Error
-                        ? `提交失败：${error.message}`
-                        : "提交失败，请检查 HeyGem 服务设置",
-                    );
-                  }
-                }}
+                disabled={busy || (job.stage === "avatar_gen" && ["queued", "running"].includes(job.status))}
+                onClick={() => void generateAvatar()}
               >
-                调用 HeyGem 生成对口型
+                {avatarNeedsRegeneration ? "仅重新生成数字人口型" : "生成数字人口型"}
               </button>
             )}
           </div>
-          {avatarState && <p className="vf-upload-state">{avatarState}</p>}
+          {avatarState && <p className={avatarState.startsWith("暂时无法") || avatarState.startsWith("切换失败") ? "vf-upload-state error" : "vf-upload-state"}>{avatarState}</p>}
           {uploadState && (
             <p
               className={
@@ -789,7 +939,7 @@ export function Workbench({
               {uploadState}
             </p>
           )}
-          {avatarPreviews.length > 0 && (
+          {avatarPreviews.length > 0 && !avatarNeedsRegeneration && (
             <section className="vf-chapter-previews">
               <h3>按章节预览数字人</h3>
               <p>每段只播放对应章节的口型画面，便于单独检查。</p>
@@ -811,6 +961,14 @@ export function Workbench({
               </div>
             </section>
           )}
+          {job.stage === "gate_avatar" && (
+            <div className="vf-step-actionbar">
+              <div><b>{meta.avatar?.enabled ? "逐章检查口型和人物位置" : "本作品不使用数字人"}</b><span>{meta.avatar?.enabled ? `${audit?.avatar.previews || 0} 个章节预览已生成。可在右侧对话微调，完成后再确认导出。` : "可以直接进入成片导出确认。"}</span></div>
+              <div className="vf-action-cluster"><button className="vf-secondary" onClick={ensurePreview}>{previewUrl ? "刷新合成预览" : "加载合成预览"}</button><button className="vf-primary" disabled={busy || (meta.avatar?.enabled && (!audit?.avatar.outputExists || !previewUrl))} onClick={() => api.approve(job.id).then(load)}>数字人验收通过，进入导出</button></div>
+            </div>
+          )}
+            </>;
+          })()}
         </>
       );
     return (
@@ -823,24 +981,45 @@ export function Workbench({
             {renderProgressParts[2] ?? "准备中"}
           </p>
         ) : job.output?.exists ? (
-          <div className="vf-stage-actions">
-            <a
-              className="vf-action-link vf-play-action"
-              href={`/api/jobs/${job.id}/output`}
-            >
-              ⬇ 下载成片
-              {job.output.durationSec
-                ? `（${Math.round(job.output.durationSec)} 秒）`
-                : ""}
-            </a>
-            <button disabled={busy} onClick={startRender}>
-              重新渲染
-            </button>
-          </div>
+          <>
+            <div className="vf-operation-impact">
+              <b>重新导出从哪里开始？</b>
+              <span>从“导出成片”开始，不返回 PPT、配音、字幕或数字人环节。</span>
+              <small><strong>复用：</strong>PPT 画面、配音、字幕、数字人口型视频</small>
+              <small><strong>重做：</strong>录制画面、混合声音并覆盖旧 MP4；完成后同步更新封面</small>
+            </div>
+            <div className="vf-stage-actions">
+              <a
+                className="vf-action-link vf-play-action"
+                href={`/api/jobs/${job.id}/output`}
+              >
+                ⬇ 下载成片
+                {job.output.durationSec
+                  ? `（${Math.round(job.output.durationSec)} 秒）`
+                  : ""}
+              </a>
+              <button disabled={busy} onClick={() => setRenderConfirmOpen(true)}>
+                仅重新导出成片
+              </button>
+            </div>
+            {renderConfirmOpen && (
+              <div className="vf-operation-confirm" role="alertdialog" aria-label="确认重新导出成片">
+                <div>
+                  <b>确认覆盖当前成片？</b>
+                  <span>不会重新生成 PPT、配音、字幕或数字人。预计按视频真实时长重新录制，并覆盖当前 MP4。</span>
+                </div>
+                <div className="vf-action-cluster">
+                  <button className="vf-secondary" onClick={() => setRenderConfirmOpen(false)}>取消</button>
+                  <button className="vf-primary" disabled={busy} onClick={startRender}>确认覆盖并重新导出</button>
+                </div>
+              </div>
+            )}
+          </>
         ) : (
-          <div className="vf-stage-actions">
-            <button disabled={busy} onClick={startRender}>
-              🎬 生成成片（服务端渲染）
+          <div className="vf-step-actionbar">
+            <div><b>最后确认一次完整预览</b><span>确认声音、字幕、数字人和章节切换都正常后，再开始服务端生成 MP4。</span></div>
+            <button className="vf-primary" disabled={busy} onClick={job.stage === "gate_render" ? () => api.approve(job.id).then(load) : startRender}>
+              {job.stage === "gate_render" ? "确认预览，开始生成成片" : "生成成片（服务端渲染）"}
             </button>
           </div>
         )}
@@ -851,6 +1030,7 @@ export function Workbench({
         </p>
         {previewUrl ? (
           <iframe
+            key={`result-${previewRevision}`}
             className="vf-live-preview"
             title="成片预览"
             src={`${previewUrl}?auto=1`}
@@ -887,11 +1067,13 @@ export function Workbench({
           <h1 title={job.title ?? "未命名作品"}>{job.title ?? "未命名作品"}</h1>
         </div>
         <em>
-          {job.status === "done"
-            ? "已完成"
-            : job.status === "failed"
-              ? "需要处理"
-              : "制作中"}
+            {job.status === "done"
+              ? "已完成"
+              : job.status === "failed"
+                ? "需要处理"
+                : job.status === "waiting_approval"
+                  ? "等你确认"
+                : "制作中"}
         </em>
       </header>
       <ol className="vf-rail">
@@ -940,10 +1122,15 @@ export function Workbench({
           <div className="vf-failed-banner-copy">
             <strong>任务失败，已停止继续处理</strong>
             <span>{job.error || "后端未返回具体错误"}</span>
-            <small>失败阶段：{job.stage}</small>
+            <small>失败环节：{failedRetryImpact.label}</small>
+            <div className="vf-retry-impact">
+              <span><b>重新操作：</b>{failedRetryImpact.redo}</span>
+              <span><b>继续保留：</b>{failedRetryImpact.keep}</span>
+              <span><b>完成以后：</b>{failedRetryImpact.next}</span>
+            </div>
           </div>
           <button type="button" onClick={() => void retryFailedStage()} disabled={busy}>
-            {busy ? "正在重试..." : "重试此环节"}
+            {busy ? "正在重新处理..." : `从“${failedRetryImpact.label}”继续`}
           </button>
         </div>
       )}

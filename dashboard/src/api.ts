@@ -33,6 +33,7 @@ export interface Job {
   created_at: string;
   updated_at: string;
   excerpt?: string | null;
+  coverExists?: boolean;
   error?: string | null;
 }
 
@@ -94,7 +95,7 @@ export interface JobDetail extends Job {
   events: JobEvent[];
   feedback: Feedback[];
   chapterGeneration: ChapterGeneration;
-  devServer: { running: boolean; port?: number; url?: string };
+  devServer: { running: boolean; port?: number; url?: string; mode?: "static" | "dev" };
   output?: RenderOutput;
 }
 
@@ -158,6 +159,22 @@ export interface AvatarPreview {
   id: string;
   name: string;
   url: string;
+}
+
+export interface JobAudit {
+  jobId: number;
+  layout: { ok: boolean; chapters: Array<{ chapter: string; reserved: boolean }> };
+  audio: { ok: boolean; segments: number };
+  subtitle: { enabled: boolean; ok: boolean; preset: string; position: string };
+  avatar: {
+    enabled: boolean;
+    sourceExists: boolean;
+    outputExists: boolean;
+    previews: number;
+    service: TestResult;
+  };
+  render: { ok: boolean; outputExists: boolean };
+  dialogue: { total: number };
 }
 
 export interface DouyinExtraction {
@@ -273,6 +290,7 @@ export const api = {
     req<{ jobId: number }>(`/articles/${id}/select`, { method: "POST" }),
   jobs: () => req<Job[]>("/jobs"),
   job: (id: number) => req<JobDetail>(`/jobs/${id}`),
+  audit: (id: number) => req<JobAudit>(`/jobs/${id}/audit`),
   deleteJob: (id: number) =>
     req<{ ok: boolean; workspaceRemoved: boolean }>(`/jobs/${id}`, {
       method: "DELETE",

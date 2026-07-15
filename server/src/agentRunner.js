@@ -271,7 +271,9 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
       { role: "user", content: prompt },
     ];
     reportProgress(jobId, stage, onProgress, 22, "模型已连接，正在分析任务");
-    for (let turn = 0; turn < 40; turn++) {
+    // 上限按最大作品规模留余量：5 章作品实测 ~40+ 轮（每章 read/write/tsc
+    // 多轮），40 的旧上限在第 5 章末尾撞线（job#13 实测）。
+    for (let turn = 0; turn < 100; turn++) {
       const started = Date.now();
       let response;
       let responseText = "";
