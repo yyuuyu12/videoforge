@@ -11,6 +11,7 @@ import { DATA_ROOT } from "./config.js";
 const SETTINGS_PATH = join(DATA_ROOT, "settings.local.json");
 
 const DEFAULTS = {
+  onboarded: false,
   llm: {
     // "subscription" = ride the local `claude` login (v1 behavior, no key).
     // "api" = call a provider directly with the user's own key.
@@ -90,6 +91,7 @@ const mask = (key) =>
 export function publicSettings() {
   const s = loadSettings();
   return {
+    onboarded: Boolean(s.onboarded),
     llm: { ...s.llm, apiKey: undefined, apiKeyState: mask(s.llm.apiKey) },
     minimax: {
       ...s.minimax,

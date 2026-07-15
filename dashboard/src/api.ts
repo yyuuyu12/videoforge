@@ -105,6 +105,7 @@ export interface KeyState {
 }
 
 export interface Settings {
+  onboarded: boolean;
   llm: {
     mode: "subscription" | "api";
     provider: "anthropic" | "openai-compatible";

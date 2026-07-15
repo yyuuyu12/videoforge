@@ -190,3 +190,41 @@ body { color:var(--vf-ink); background:linear-gradient(135deg,#f2eadc 0%,#fffdf8
 .vf-source-warning { display:grid; gap:4px; margin:14px 0 0; padding:12px 14px; border:1px solid rgba(176,97,49,.28); border-radius:8px; background:rgba(255,245,232,.74); }
 .vf-source-warning b { color:#84492f; font-size:13px; }
 .vf-source-warning span { color:#755d4c; font-size:12px; line-height:1.55; }
+
+.vf-onboarding { min-height:100vh; padding:24px 24px 64px; background:linear-gradient(145deg,#eee4d6 0%,#fffdf8 50%,#eaded4 100%); }
+.vf-onboarding-brand { display:flex; width:min(960px,100%); align-items:center; gap:10px; margin:0 auto 34px; color:var(--vf-ink); font-size:19px; font-weight:800; }
+.vf-onboarding-brand b { display:grid; place-items:center; width:34px; height:34px; border-radius:8px; background:#7a4f2a; color:#fff; font:800 13px Georgia,serif; }
+.vf-onboarding-shell { width:min(960px,100%); margin:0 auto; }
+.vf-onboarding-steps { display:grid; grid-template-columns:repeat(3,1fr); margin:0 0 18px; padding:0; list-style:none; }
+.vf-onboarding-steps li { position:relative; display:flex; align-items:center; gap:9px; color:#9b8a78; font-size:12px; font-weight:700; }
+.vf-onboarding-steps li:not(:last-child)::after { position:absolute; right:12px; left:40px; height:1px; background:rgba(104,65,31,.18); content:""; }
+.vf-onboarding-steps b { z-index:1; display:grid; place-items:center; width:28px; height:28px; border:1px solid rgba(104,65,31,.22); border-radius:50%; background:#f8f2e9; font-size:11px; }
+.vf-onboarding-steps span { z-index:1; padding-right:9px; background:#f1e8dc; }
+.vf-onboarding-steps .active { color:#68411f; }.vf-onboarding-steps .active b { border-color:#7a4f2a; background:#7a4f2a; color:#fff; }
+.vf-onboarding-steps .done { color:#27704b; }.vf-onboarding-steps .done b { border-color:#2b7e52; background:#2b7e52; color:#fff; }
+.vf-onboarding-panel { min-height:540px; padding:52px 56px 36px; border:1px solid rgba(255,255,255,.78); border-radius:8px; background:rgba(255,252,247,.76); box-shadow:0 18px 52px rgba(91,61,36,.13),inset 0 1px 0 #fff; backdrop-filter:blur(18px); }
+.vf-onboarding-panel>h1 { margin:5px 0 10px; color:var(--vf-ink); font-size:30px; letter-spacing:0; }
+.vf-onboarding-panel>p:not(.vf-kicker) { max-width:680px; margin:0 0 28px; color:var(--vf-muted); font-size:14px; line-height:1.7; }
+.vf-onboarding-choices { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px; margin:0 0 18px; }
+.vf-onboarding-choices button { position:relative; display:flex; min-height:112px; align-items:flex-start; flex-direction:column; gap:7px; border:1px solid rgba(104,65,31,.18); border-radius:8px; padding:20px; background:rgba(255,255,255,.52); color:var(--vf-ink); text-align:left; }
+.vf-onboarding-choices button.selected { border-color:#8a5a33; background:rgba(154,107,63,.1); box-shadow:0 0 0 3px rgba(138,90,51,.1); }
+.vf-onboarding-choices b { font-size:15px; }.vf-onboarding-choices span { color:var(--vf-muted); font-size:12px; line-height:1.55; }
+.vf-onboarding-choices em { position:absolute; top:14px; right:14px; padding:4px 7px; border-radius:99px; background:rgba(43,126,82,.12); color:#27704b; font-size:10px; font-style:normal; }
+.vf-onboarding-fields { display:grid; grid-template-columns:minmax(160px,.7fr) minmax(250px,1.3fr); gap:10px; margin:18px 0; }
+.vf-onboarding-fields.single { grid-template-columns:minmax(0,620px); }
+.vf-onboarding-fields input,.vf-onboarding-fields select { width:100%; min-width:0; min-height:44px; border:1px solid rgba(104,65,31,.18); border-radius:8px; padding:10px 12px; background:rgba(255,255,255,.72); color:var(--vf-ink); }
+.vf-onboarding-result { display:grid; gap:4px; margin:18px 0; padding:12px 14px; border-radius:8px; font-size:12px; }
+.vf-onboarding-result.ok { border:1px solid rgba(43,126,82,.22); background:rgba(43,126,82,.09); color:#276345; }.vf-onboarding-result.error { border:1px solid rgba(176,61,49,.22); background:rgba(176,61,49,.08); color:#8e3028; }
+.vf-onboarding-result span { line-height:1.55; }
+.vf-onboarding-panel footer { display:flex; min-height:72px; align-items:flex-end; justify-content:space-between; gap:18px; margin-top:28px; padding-top:20px; border-top:1px solid rgba(104,65,31,.12); }
+.vf-onboarding-panel footer>span { max-width:410px; color:var(--vf-muted); font-size:11px; line-height:1.6; }
+.vf-onboarding-panel footer>div { display:flex; gap:9px; }
+.vf-onboarding-panel footer button { min-height:42px; border:1px solid rgba(104,65,31,.2); border-radius:8px; padding:9px 15px; background:rgba(255,252,247,.8); color:#68411f; font-weight:700; }
+.vf-onboarding-panel footer button.vf-primary { border-color:#7a4f2a; background:#7a4f2a; color:#fff; }.vf-onboarding-panel footer button:disabled { cursor:not-allowed; opacity:.48; }
+.vf-onboarding-panel footer .vf-text-action { border-color:transparent; background:transparent; box-shadow:none; }
+.vf-onboarding-avatar { display:grid; grid-template-columns:minmax(0,2fr) minmax(180px,1fr); min-height:230px; overflow:hidden; border:1px solid rgba(104,65,31,.16); border-radius:8px; background:#eee5d8; }
+.vf-onboarding-avatar>div { display:flex; justify-content:center; flex-direction:column; padding:36px; }.vf-onboarding-avatar span { color:#9a6b3f; font-size:11px; }.vf-onboarding-avatar b { margin-top:9px; font-size:23px; }
+.vf-onboarding-avatar aside { display:flex; align-items:center; justify-content:center; flex-direction:column; gap:10px; margin:20px; border:1px dashed rgba(104,65,31,.34); border-radius:8px; background:#d8c5aa; color:#68411f; }
+.vf-onboarding-avatar i { width:54px; height:70px; border-radius:50% 50% 38% 38%; background:rgba(122,79,42,.24); }
+.vf-onboarding-avatar strong { font-size:12px; }
+@media(max-width:700px){.vf-onboarding{padding:16px 14px 38px}.vf-onboarding-brand{margin-bottom:24px}.vf-onboarding-steps li{gap:5px}.vf-onboarding-steps li:not(:last-child)::after{display:none}.vf-onboarding-steps span{padding-right:0;background:transparent;font-size:10px}.vf-onboarding-panel{min-height:0;padding:30px 20px 22px}.vf-onboarding-panel>h1{font-size:24px}.vf-onboarding-choices,.vf-onboarding-fields{grid-template-columns:1fr}.vf-onboarding-choices button{min-height:92px}.vf-onboarding-panel footer{align-items:stretch;flex-direction:column}.vf-onboarding-panel footer>div{width:100%;flex-wrap:wrap}.vf-onboarding-panel footer button{flex:1}.vf-onboarding-avatar{grid-template-columns:1fr;min-height:300px}.vf-onboarding-avatar aside{min-height:150px}.vf-onboarding-avatar>div{padding:24px}}

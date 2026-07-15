@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { api, type StageDef } from "./api";
+import { api, type Settings as SettingsData, type StageDef } from "./api";
 import { Articles } from "./pages/Articles";
 import { Settings } from "./pages/Settings";
 import { NewWork } from "./pages/NewWork";
@@ -7,6 +7,7 @@ import { Works } from "./pages/Works";
 import { Workbench } from "./pages/Workbench";
 import { Assets } from "./pages/Assets";
 import { Usage } from "./pages/Usage";
+import { Onboarding } from "./pages/Onboarding";
 
 type Tab = "works" | "new" | "assets" | "settings" | "usage";
 
@@ -14,10 +15,22 @@ export default function App() {
   const [tab, setTab] = useState<Tab>("works");
   const [openJob, setOpenJob] = useState<number | null>(null);
   const [stages, setStages] = useState<StageDef[]>([]);
+  const [settings, setSettings] = useState<SettingsData | null>(null);
+  const [startupError, setStartupError] = useState("");
 
   useEffect(() => {
     api.meta().then((m) => setStages(m.stages)).catch(() => {});
+    api.settings().then(setSettings).catch((error) => setStartupError(error.message));
   }, []);
+
+  if (startupError) return <main className="vf-opening-loader"><strong>工作台暂时无法启动</strong><span>{startupError}</span></main>;
+  if (!settings) return <main className="vf-opening-loader"><strong>正在准备工作台</strong><span>读取这台电脑上的配置…</span></main>;
+  if (!settings.onboarded) {
+    return <Onboarding settings={settings} onComplete={(destination) => {
+      setSettings((current) => current ? { ...current, onboarded: true } : current);
+      setTab(destination);
+    }} />;
+  }
 
   return (
     <div className="vf-shell">
