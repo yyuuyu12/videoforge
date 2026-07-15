@@ -96,7 +96,14 @@ const progressActionLabels: Record<string, string> = {
 function friendlyProgressText(text: string) {
   const normalized = text.trim().replace(/^正在执行[：:]\s*/, "");
   if (progressActionLabels[normalized]) return progressActionLabels[normalized];
-  if (/^[a-z][a-z0-9_]*$/i.test(normalized)) return "正在处理当前画面";
+  const actions = normalized.split(/[、,\s]+/).filter(Boolean);
+  if (actions.length > 0 && actions.every((action) => progressActionLabels[action])) {
+    const unique = new Set(actions);
+    if (unique.has("write_file") || unique.has("edit_file")) return "正在生成并调整画面";
+    if (unique.has("run_command")) return "正在检查生成结果";
+    return "正在读取并检查画面文件";
+  }
+  if (/\b[a-z][a-z0-9_]*\b/i.test(normalized) && normalized.includes("_")) return "正在处理当前画面";
   return text.trim() || "正在处理当前任务";
 }
 
@@ -363,6 +370,11 @@ export function Workbench({
       && (activePhase !== "逐页生成" || item.chapter === null || item.chapter === selectedChapter),
   );
   const chapterGeneration = job.chapterGeneration;
+  const currentChapterTitle = chapterGeneration.chapters
+    .find((chapter) => chapter.key === chapterGeneration.current?.chapter)?.title;
+  const chapterGenerationMessage = currentChapterTitle && chapterGeneration.current?.chapter
+    ? chapterGeneration.message.replace(chapterGeneration.current.chapter, currentChapterTitle)
+    : chapterGeneration.message;
   const activeChapter = chapterGeneration.chapters.find((chapter) => chapter.key === selectedChapter) || null;
   const allChaptersApproved = chapterGeneration.chapters.length > 0
     && chapterGeneration.approved === chapterGeneration.chapters.length;
@@ -877,7 +889,7 @@ export function Workbench({
               <strong>{chapterGeneration.completed}/{chapterGeneration.current?.total || chapterGeneration.expected || "?"} 章</strong>
             </header>
             <progress max="100" value={chapterGeneration.percent} />
-            <p>{chapterGeneration.message}</p>
+            <p>{chapterGenerationMessage}</p>
             {chapterGenerationRunning && (
               <p className="vf-generation-explainer" role="status">
                 已完成并检查通过的章节会自动加入预览；正在生成的章节完成后也会继续更新。

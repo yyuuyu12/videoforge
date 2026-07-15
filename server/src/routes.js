@@ -8,6 +8,7 @@ import { approveGate, retryJob } from "./workers/pipeline.js";
 import { runFeedback, STAGES } from "./stages.js";
 import { previewStatus, startPreview, stopPreview } from "./preview.js";
 import { decodeUtf8OrGb18030 } from "./textEncoding.js";
+import { readRegistryChapterTitles } from "./chapterMetadata.js";
 import { renderJob } from "./render.js";
 import { loadSettings, publicSettings, saveSettings } from "./settings.js";
 import { testLlmConnection } from "./providers.js";
@@ -83,7 +84,9 @@ api.get("/version", async (_req, res) => {
 });
 
 function chapterGeneration(job) {
-  const root = join(job.workspace, "presentation", "src", "chapters");
+  const presentationRoot = join(job.workspace, "presentation");
+  const root = join(presentationRoot, "src", "chapters");
+  const registryTitles = readRegistryChapterTitles(presentationRoot);
   let expected = 0;
   try {
     const outline = readFileSync(join(job.workspace, "outline.md"), "utf8");
@@ -99,14 +102,15 @@ function chapterGeneration(job) {
         const dir = join(root, entry.name);
         const files = readdirSync(dir);
         const narrationFile = files.find((name) => name === "narrations.ts");
-        let title = entry.name.replace(/^\d+[-_]?/, "").replace(/[-_]+/g, " ");
+        const chapterId = entry.name.replace(/^\d+[-_]?/, "");
+        let title = registryTitles.get(chapterId) || chapterId.replace(/[-_]+/g, " ");
         let steps = 0;
         if (narrationFile) {
           const narration = readFileSync(join(dir, narrationFile), "utf8");
           const lines = narration.match(/^\s*["'`](.+?)["'`],?\s*$/gm) || [];
           steps = lines.length;
           const first = lines[0]?.replace(/^\s*["'`]|["'`],?\s*$/g, "").trim();
-          if (first) title = first.length > 30 ? `${first.slice(0, 30)}…` : first;
+          if (!registryTitles.has(chapterId) && first) title = first.length > 30 ? `${first.slice(0, 30)}…` : first;
         }
         // Chapters may use the shared presentation stylesheet instead of a per-chapter CSS file.
         const ready = Boolean(narrationFile && files.some((name) => name.endsWith(".tsx")));
@@ -137,8 +141,9 @@ function chapterGeneration(job) {
   const percent = job.stage === "chapter_gen" && liveProgress?.total
     ? Math.min(100, Math.round((liveCompleted / Number(liveProgress.total)) * 100))
     : (total ? Math.round((ready / total) * 100) : 0);
+  const currentChapterTitle = chapters.find((chapter) => chapter.key === liveProgress?.chapter)?.title;
   const liveMessage = liveProgress && job.stage === "chapter_gen"
-    ? `第 ${liveProgress.current}/${liveProgress.total} 章 · ${liveProgress.chapter || "画面"} · ${liveProgress.message || "正在生成"}`
+    ? `第 ${liveProgress.current}/${liveProgress.total} 章 · ${currentChapterTitle || "当前画面"} · ${liveProgress.message || "正在生成"}`
     : null;
   if (job.stage === "chapter_gen") {
     chapters.forEach((chapter) => {
