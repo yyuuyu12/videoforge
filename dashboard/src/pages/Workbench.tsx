@@ -629,31 +629,53 @@ export function Workbench({
               </button>
             ))}
           </div>
-          <section className="vf-option-panel">
-            <div className="vf-option-heading"><div><h3>文字与排版</h3><p>先用作品级预设控制字号和页面信息量，不改底层 Skill。</p></div></div>
-            <div className="vf-option-row">
-              <span>文字大小</span>
-              <div className="vf-segments">
-                {[["compact", "紧凑"], ["large", "大字（推荐）"], ["extra-large", "超大字"]].map(([value, label]) => (
-                  <button key={value} disabled={!styleEditable || busy} className={(meta.typography?.fontSize || "large") === value ? "selected" : ""} onClick={() => saveOptions({ typography: { ...(meta.typography || {}), fontSize: value } })}>{label}</button>
-                ))}
+          <section className="vf-option-panel vf-option-preview-panel">
+            <div className="vf-option-controls">
+              <div className="vf-option-heading"><div><h3>文字与排版</h3><p>先用作品级预设控制字号和页面信息量，不改底层 Skill。</p></div></div>
+              <div className="vf-option-row">
+                <span>文字大小</span>
+                <div className="vf-segments">
+                  {[["compact", "紧凑"], ["large", "大字（推荐）"], ["extra-large", "超大字"]].map(([value, label]) => (
+                    <button key={value} disabled={!styleEditable || busy} className={(meta.typography?.fontSize || "large") === value ? "selected" : ""} onClick={() => saveOptions({ typography: { ...(meta.typography || {}), fontSize: value } })}>{label}</button>
+                  ))}
+                </div>
+              </div>
+              <div className="vf-option-row">
+                <span>排版密度</span>
+                <div className="vf-segments">
+                  {[["airy", "留白多"], ["balanced", "均衡（推荐）"], ["dense", "信息密集"]].map(([value, label]) => (
+                    <button key={value} disabled={!styleEditable || busy} className={(meta.typography?.density || "balanced") === value ? "selected" : ""} onClick={() => saveOptions({ typography: { ...(meta.typography || {}), density: value } })}>{label}</button>
+                  ))}
+                </div>
               </div>
             </div>
-            <div className="vf-option-row">
-              <span>排版密度</span>
-              <div className="vf-segments">
-                {[["airy", "留白多"], ["balanced", "均衡（推荐）"], ["dense", "信息密集"]].map(([value, label]) => (
-                  <button key={value} disabled={!styleEditable || busy} className={(meta.typography?.density || "balanced") === value ? "selected" : ""} onClick={() => saveOptions({ typography: { ...(meta.typography || {}), density: value } })}>{label}</button>
-                ))}
-              </div>
+            <div
+              className={`vf-mini-stage vf-typography-stage theme-${meta.theme || "midnight-press"} size-${meta.typography?.fontSize || "large"} density-${meta.typography?.density || "balanced"}`}
+              aria-label="当前文字与排版效果预览"
+            >
+              <div className="vf-mini-meta"><i /><span /></div>
+              <div className="vf-mini-title"><i /><i /></div>
+              <div className="vf-mini-rule" />
+              <div className="vf-mini-content"><i /><i /><i /><i /><i /><i /></div>
             </div>
           </section>
-          <section className="vf-option-panel">
-            <div className="vf-option-heading"><div><h3>字幕预设</h3><p>深色主题自动使用浅色字幕，浅色主题自动使用深色字幕。</p></div><label className="vf-switch"><input type="checkbox" disabled={!styleEditable || busy} checked={meta.subtitle?.enabled !== false} onChange={(event) => saveOptions({ subtitle: { ...(meta.subtitle || {}), enabled: event.target.checked } })} /><span /></label></div>
-            {meta.subtitle?.enabled !== false && <>
-              <div className="vf-option-row"><span>字幕样式</span><div className="vf-segments">{[["auto-contrast", "自动高对比"], ["soft-panel", "柔和底板"], ["outline", "描边字幕"]].map(([value, label]) => <button key={value} disabled={!styleEditable || busy} className={(meta.subtitle?.preset || "auto-contrast") === value ? "selected" : ""} onClick={() => saveOptions({ subtitle: { ...(meta.subtitle || {}), enabled: true, preset: value } })}>{label}</button>)}</div></div>
-              <div className="vf-option-row"><span>字幕位置</span><div className="vf-segments">{[["bottom", "底部"], ["lower-third", "下三分之一"], ["top", "顶部"]].map(([value, label]) => <button key={value} disabled={!styleEditable || busy} className={(meta.subtitle?.position || "bottom") === value ? "selected" : ""} onClick={() => saveOptions({ subtitle: { ...(meta.subtitle || {}), enabled: true, position: value } })}>{label}</button>)}</div></div>
-            </>}
+          <section className="vf-option-panel vf-option-preview-panel">
+            <div className="vf-option-controls">
+              <div className="vf-option-heading"><div><h3>字幕预设</h3><p>深色主题自动使用浅色字幕，浅色主题自动使用深色字幕。</p></div><label className="vf-switch"><input type="checkbox" disabled={!styleEditable || busy} checked={meta.subtitle?.enabled !== false} onChange={(event) => saveOptions({ subtitle: { ...(meta.subtitle || {}), enabled: event.target.checked } })} /><span /></label></div>
+              {meta.subtitle?.enabled !== false && <>
+                <div className="vf-option-row"><span>字幕样式</span><div className="vf-segments">{[["auto-contrast", "自动高对比"], ["soft-panel", "柔和底板"], ["outline", "描边字幕"]].map(([value, label]) => <button key={value} disabled={!styleEditable || busy} className={(meta.subtitle?.preset || "auto-contrast") === value ? "selected" : ""} onClick={() => saveOptions({ subtitle: { ...(meta.subtitle || {}), enabled: true, preset: value } })}>{label}</button>)}</div></div>
+                <div className="vf-option-row"><span>字幕位置</span><div className="vf-segments">{[["bottom", "底部"], ["lower-third", "下三分之一"], ["top", "顶部"]].map(([value, label]) => <button key={value} disabled={!styleEditable || busy} className={(meta.subtitle?.position || "bottom") === value ? "selected" : ""} onClick={() => saveOptions({ subtitle: { ...(meta.subtitle || {}), enabled: true, position: value } })}>{label}</button>)}</div></div>
+              </>}
+            </div>
+            <div
+              className={`vf-mini-stage vf-subtitle-stage theme-${meta.theme || "midnight-press"} subtitle-${meta.subtitle?.position || "bottom"} preset-${meta.subtitle?.preset || "auto-contrast"} ${meta.subtitle?.enabled === false ? "subtitles-off" : ""}`}
+              aria-label="当前字幕位置与样式预览"
+            >
+              <div className="vf-mini-meta"><i /><span /></div>
+              <div className="vf-mini-title"><i /><i /></div>
+              <div className="vf-subtitle-safe-band" />
+              <div className="vf-mini-caption"><i /><i /></div>
+            </div>
           </section>
           <section className="vf-avatar-config">
             <h3>是否加入你的形象</h3>
