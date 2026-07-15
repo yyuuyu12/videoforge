@@ -26,7 +26,6 @@ const phaseSubs = [
   "带声音完整播放",
 ];
 const conversationalPhases = new Set([
-  "原文确认",
   "口播稿审阅",
   "逐页生成",
   "配音字幕",
@@ -84,6 +83,22 @@ const stageProgress: Record<string, string> = {
   avatar_wire: "正在把数字人接入每一页画面",
   render: "正在准备成片",
 };
+
+const progressActionLabels: Record<string, string> = {
+  run_command: "正在检查生成结果",
+  write_file: "正在生成新版画面",
+  read_file: "正在读取画面内容",
+  edit_file: "正在调整画面",
+  list_files: "正在整理画面文件",
+  search_files: "正在检查画面内容",
+};
+
+function friendlyProgressText(text: string) {
+  const normalized = text.trim().replace(/^正在执行[：:]\s*/, "");
+  if (progressActionLabels[normalized]) return progressActionLabels[normalized];
+  if (/^[a-z][a-z0-9_]*$/i.test(normalized)) return "正在处理当前画面";
+  return text.trim() || "正在处理当前任务";
+}
 
 type RetryImpact = {
   label: string;
@@ -174,7 +189,9 @@ export function Workbench({
   const [audit, setAudit] = useState<JobAudit | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
+  const [chapterFeedbackScope, setChapterFeedbackScope] = useState<"chapter" | "global">("chapter");
   const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({});
+  const [feedbackSending, setFeedbackSending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [uploadState, setUploadState] = useState("");
   const [avatarState, setAvatarState] = useState("");
@@ -204,6 +221,8 @@ export function Workbench({
     setSourceDraft("");
     setSourceSaveState("");
     setPreviewNotice("");
+    setChapterFeedbackScope("chapter");
+    setFeedbackSending(false);
     trackedFeedbackIds.current.clear();
     feedbackStatuses.current.clear();
   }, [jobId]);
@@ -270,27 +289,46 @@ export function Workbench({
       if (!trackedFeedbackIds.current.has(item.id)) continue;
       if (item.status === "done" && previous !== "done") {
         trackedFeedbackIds.current.delete(item.id);
-        if (item.phase && previewAffectingFeedbackPhases.has(item.phase)) {
+        if (item.phase === "口播稿审阅") {
+          void api.jobFile(jobId, "script.md")
+            .then((result) => {
+              setFiles((old) => ({ ...old, ["script.md"]: result.content }));
+              setPreviewNotice("口播稿已更新，左侧已经显示最新内容");
+            })
+            .catch(() => setPreviewNotice("口播稿修改已完成，请刷新页面查看最新内容"));
+        } else if (item.phase && previewAffectingFeedbackPhases.has(item.phase)) {
           setPreviewRevision((value) => value + 1);
-          setPreviewNotice("修改完成，左侧预览已自动刷新");
+          setPreviewNotice(item.phase === "逐页生成"
+            ? item.chapter
+              ? "当前页面已更新，左侧预览已自动刷新"
+              : "全部页面已更新，左侧预览已自动刷新"
+            : "修改完成，左侧预览已自动刷新");
         }
       } else if (item.status === "failed") {
         trackedFeedbackIds.current.delete(item.id);
       }
     }
-  }, [job]);
+  }, [job, jobId]);
   const meta = useMemo(() => (job ? parseMeta(job) : {}), [job]);
   if (!job || selected === null) return <WorkbenchLoading />;
   const current = phaseIndex(job);
   const activePhase = phases[selected];
   const chatEnabled = conversationalPhases.has(activePhase)
     && (activePhase !== "逐页生成" || Boolean(selectedChapter));
-  const chapterScope = activePhase === "逐页生成" ? selectedChapter : null;
+  const chapterScope = activePhase === "逐页生成" && chapterFeedbackScope === "chapter"
+    ? selectedChapter
+    : null;
   const phaseFeedback = job.feedback.filter((item) =>
     item.phase === activePhase && (activePhase !== "逐页生成" || item.chapter === chapterScope),
   );
   const draftKey = chapterScope ? `${activePhase}:${chapterScope}` : activePhase;
   const message = messageDrafts[draftKey] || "";
+  const feedbackRunning = job.feedback.some((item) => item.phase === activePhase && item.status === "running");
+  const activeFeedback = job.feedback.find((item) =>
+    item.phase === activePhase
+      && item.status === "running"
+      && (activePhase !== "逐页生成" || item.chapter === null || item.chapter === selectedChapter),
+  );
   const chapterGeneration = job.chapterGeneration;
   const activeChapter = chapterGeneration.chapters.find((chapter) => chapter.key === selectedChapter) || null;
   const allChaptersApproved = chapterGeneration.chapters.length > 0
@@ -301,12 +339,30 @@ export function Workbench({
   const chapterPreviewUrl = previewUrl && activeChapter
     ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}chapter=${activeChapter.index - 1}&revision=${previewRevision}`
     : previewUrl;
+  const chapterGenerationRunning = job.stage === "chapter_gen" && ["queued", "running"].includes(job.status);
   const activeProgressEvent = job.events.find(
     (event) => event.stage === job.stage && event.message.startsWith("progress|"),
   );
   const activeProgressParts = activeProgressEvent?.message.split("|") ?? [];
   const activePercent = Number(activeProgressParts[1] ?? 0);
-  const activeProgressText = activeProgressParts[2] || stageProgress[job.stage] || "正在处理当前任务";
+  const activeProgressText = friendlyProgressText(
+    activeProgressParts[2] || stageProgress[job.stage] || "正在处理当前任务",
+  );
+  const submitFeedback = async () => {
+    const content = message.trim();
+    if (!content || feedbackSending || feedbackRunning) return;
+    setFeedbackSending(true);
+    setPreviewNotice("");
+    try {
+      const submitted = await api.sendFeedback(job.id, chapterScope, content, activePhase);
+      trackedFeedbackIds.current.add(submitted.feedbackId);
+      feedbackStatuses.current.set(submitted.feedbackId, "running");
+      setMessageDrafts((drafts) => ({ ...drafts, [draftKey]: "" }));
+      await load();
+    } finally {
+      setFeedbackSending(false);
+    }
+  };
   const retryFailedStage = async () => {
     if (busy) return;
     setBusy(true);
@@ -494,7 +550,7 @@ export function Workbench({
           {sourceSaveState && <p className="vf-source-save-state" role="status">{sourceSaveState}</p>}
           {job.stage === "gate_source" && (
             <div className="vf-step-actionbar">
-              <div><b>原文检查完成了吗？</b><span>也可以先在右侧对话中提出修改，再确认进入下一步。</span></div>
+              <div><b>原文检查完成了吗？</b><span>需要调整可直接编辑原文；保存后由你手动确认进入下一步。</span></div>
               <button
                 className="vf-primary"
                 disabled={busy || sourceEditing || !files["article.md"]}
@@ -526,6 +582,7 @@ export function Workbench({
               <div><b>{activeProgressText}</b><p>原文已经确认。现在生成口播稿和画面规划，完成后会停在本页等待审阅。</p></div>
             </div>
           ) : textView(files["script.md"], "口播稿尚未生成。")}
+          {previewNotice && <p className="vf-inline-success" role="status">{previewNotice}</p>}
           {job.stage === "gate_script" && (
             <div className="vf-step-actionbar">
               <button className="vf-secondary"
@@ -762,6 +819,11 @@ export function Workbench({
             </header>
             <progress max="100" value={chapterGeneration.percent} />
             <p>{chapterGeneration.message}</p>
+            {chapterGenerationRunning && (
+              <p className="vf-generation-explainer" role="status">
+                正在按新风格重做画面。生成期间不会展示旧版预览；全部章节生成并通过检查后，左侧会自动更新。
+              </p>
+            )}
             {chapterGeneration.chapters.length > 0 && (
               <div className="vf-chapter-review-list">
                 {chapterGeneration.chapters.map((chapter) => (
@@ -818,9 +880,15 @@ export function Workbench({
               )}
             </div>
           )}
-          {previewUrl ? (
+          {chapterGenerationRunning ? (
+            <div className="vf-preview vf-generation-preview" role="status" aria-live="polite">
+              <span className="vf-loading-ring" />
+              <b>正在生成新版画面</b>
+              <span>{chapterGeneration.completed}/{chapterGeneration.current?.total || chapterGeneration.expected || "?"} 章完成，全部检查通过后自动显示</span>
+            </div>
+          ) : previewUrl ? (
             <iframe
-              key={`chapters-${previewRevision}`}
+              key={`chapters-${job.stage}-${previewRevision}`}
               className="vf-live-preview"
               title="作品预览"
               src={chapterPreviewUrl}
@@ -833,7 +901,7 @@ export function Workbench({
             </div>
           )}
           <div className="vf-stage-actions">
-            <button onClick={ensurePreview}>
+            <button onClick={ensurePreview} disabled={chapterGenerationRunning}>
               {busy ? "正在启动…" : "加载预览"}
             </button>
             {previewUrl && (
@@ -865,6 +933,16 @@ export function Workbench({
         <>
           <p className="vf-kicker">配音字幕</p>
           <h2>声音与字幕时间轴</h2>
+          {["audio_synth", "subtitle_cues"].includes(job.stage) && ["queued", "running"].includes(job.status) && (
+            <div className="vf-next-stage-loading vf-audio-loading" role="status" aria-live="polite">
+              <span className="vf-loading-ring" />
+              <div>
+                <b>{activeProgressText}</b>
+                <p>{job.stage === "audio_synth" ? "正在生成配音与逐字时间轴，完成后会自动进入试听。" : "配音已经完成，正在生成精确字幕时间轴。"}</p>
+              </div>
+              {activePercent > 0 && <strong>{activePercent}%</strong>}
+            </div>
+          )}
           <section className="vf-sync-preview">
             <div className="vf-sync-preview-head">
               <div>
@@ -1237,11 +1315,26 @@ export function Workbench({
         </div>
       )}
       <div className={`vf-studio ${!chatEnabled ? "vf-studio-full" : ""}`}>
-        <section className="vf-stage-panel">{content}</section>
+        <section className="vf-stage-panel">
+          {content}
+          {activeFeedback && ["口播稿审阅", "逐页生成"].includes(activePhase) && (
+            <div className="vf-stage-update-mask" role="status" aria-live="polite">
+              <span className="vf-loading-ring" />
+              <b>{activePhase === "口播稿审阅" ? "正在更新口播稿" : activeFeedback.chapter ? "正在更新当前页面" : "正在更新全部页面"}</b>
+              <small>{activeFeedback.progress_message || "正在理解你的修改要求"} · {activeFeedback.progress || 0}%</small>
+            </div>
+          )}
+        </section>
         {chatEnabled && <aside className="vf-chat">
           <header>
             <h3>对话修改</h3>
-            <p>当前查看：{activePhase}{activeChapter && activePhase === "逐页生成" ? ` · 第 ${activeChapter.index} 章` : ""}</p>
+            <p>当前查看：{activePhase}{activePhase === "逐页生成" ? chapterFeedbackScope === "global" ? " · 全部页面" : activeChapter ? ` · 第 ${activeChapter.index} 章` : "" : ""}</p>
+            {activePhase === "逐页生成" && (
+              <div className="vf-feedback-scope" role="group" aria-label="修改范围">
+                <button type="button" className={chapterFeedbackScope === "global" ? "selected" : ""} disabled={feedbackRunning} onClick={() => setChapterFeedbackScope("global")}>全局修改</button>
+                <button type="button" className={chapterFeedbackScope === "chapter" ? "selected" : ""} disabled={feedbackRunning || !activeChapter} onClick={() => setChapterFeedbackScope("chapter")}>{activeChapter ? `当前第 ${activeChapter.index} 章` : "当前页面"}</button>
+              </div>
+            )}
           </header>
           <div className="vf-chat-log">
             {phaseFeedback.length ? (
@@ -1267,18 +1360,17 @@ export function Workbench({
             <textarea
               value={message}
               onChange={(e) => setMessageDrafts((drafts) => ({ ...drafts, [draftKey]: e.target.value }))}
-              placeholder="说说你想怎么改…"
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && !event.shiftKey) {
+                  event.preventDefault();
+                  void submitFeedback();
+                }
+              }}
+              placeholder="说说你想怎么改… Enter 发送，Shift+Enter 换行"
             />
             <button
-              onClick={async () => {
-                if (!message.trim()) return;
-                const submitted = await api.sendFeedback(job.id, chapterScope, message, activePhase);
-                trackedFeedbackIds.current.add(submitted.feedbackId);
-                feedbackStatuses.current.set(submitted.feedbackId, "running");
-                setPreviewNotice("");
-                setMessageDrafts((drafts) => ({ ...drafts, [draftKey]: "" }));
-                await load();
-              }}
+              disabled={!message.trim() || feedbackSending || feedbackRunning}
+              onClick={() => void submitFeedback()}
             >
               →
             </button>

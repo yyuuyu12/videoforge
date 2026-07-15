@@ -308,12 +308,54 @@ function ensureNativeScaffold(skill, target, theme) {
   copyFileSync(tokens, join(target, "src", "styles", "tokens.css"));
   rmSync(join(target, "src", "chapters", "01-example"), { recursive: true, force: true });
   rmSync(join(target, ".videoforge-chapter-progress.json"), { force: true });
+  rmSync(join(target, "dist", ".build-fingerprint"), { force: true });
   writeFileSync(join(target, ".theme"), `${theme}\n`);
   return { existing };
 }
 
 function jobOptions(job) {
   try { return JSON.parse(job.meta || "{}"); } catch { return {}; }
+}
+
+/**
+ * Keep the product-selected theme authoritative after an agent run. Agents
+ * may edit any file in the presentation workspace, so the selected token file
+ * and theme markers are restored deterministically before preview validation.
+ */
+export function synchronizePresentationThemeFiles({ workspace, skillRoot, theme }) {
+  const presentation = join(workspace, "presentation");
+  const sourceTokens = join(skillRoot, "themes", theme, "tokens.css");
+  const targetTokens = join(presentation, "src", "styles", "tokens.css");
+  const themeMarker = join(presentation, ".theme");
+  const outlinePath = join(workspace, "outline.md");
+  if (!existsSync(sourceTokens)) throw new Error(`找不到画面主题：${theme}`);
+
+  const previousMarker = existsSync(themeMarker) ? readFileSync(themeMarker, "utf8").trim() : "";
+  const sourceCss = readFileSync(sourceTokens);
+  const previousCss = existsSync(targetTokens) ? readFileSync(targetTokens) : null;
+  const cssDrifted = previousCss == null || !previousCss.equals(sourceCss);
+  const markerDrifted = previousMarker !== theme;
+
+  mkdirSync(join(presentation, "src", "styles"), { recursive: true });
+  copyFileSync(sourceTokens, targetTokens);
+  writeFileSync(themeMarker, `${theme}\n`, "utf8");
+
+  let outlineDrifted = false;
+  if (existsSync(outlinePath)) {
+    const original = readFileSync(outlinePath, "utf8");
+    let updated = original;
+    if (/^theme:\s*.*$/m.test(updated)) {
+      updated = updated.replace(/^theme:\s*.*$/m, `theme: ${theme}`);
+    } else {
+      updated = `theme: ${theme}\n\n${updated}`;
+    }
+    updated = updated.replace(/^(\*\*主题[：:]\*\*\s*).*$/m, `$1${theme}`);
+    outlineDrifted = updated !== original;
+    if (outlineDrifted) writeFileSync(outlinePath, updated, "utf8");
+  }
+
+  rmSync(join(presentation, "dist", ".build-fingerprint"), { force: true });
+  return { drifted: cssDrifted || markerDrifted || outlineDrifted, cssDrifted, markerDrifted, outlineDrifted };
 }
 
 const runners = {
@@ -370,6 +412,14 @@ const runners = {
     const avatarLayout = options.avatar?.enabled
       ? `本片启用讲师数字人：人物位于${avatarPosition}，所有章节正文必须为右侧讲师窗口预留 ${avatarReserve}px，不得把关键文字或图表放入该区域。讲师窗口保持右侧原锚点，宽度不得放大、不得居中或向左移动。逐章检查并重新排版所有已经存在的页面，不能只加一个视频浮层。`
       : "本片暂未启用讲师数字人。";
+    const subtitlePosition = options.subtitle?.position || "bottom";
+    const subtitleLayout = options.subtitle?.enabled === false
+      ? "本片未启用字幕，无需预留字幕安全带。"
+      : subtitlePosition === "top"
+        ? "本片启用顶部字幕：舞台顶部 170px 是字幕安全带，正文、关键数字、图表和高对比装饰不得进入；字幕层除外。"
+        : subtitlePosition === "lower-third"
+          ? "本片启用下三分之一字幕：舞台底部 290px 是字幕安全带，正文、关键数字、图表和高对比装饰不得进入；字幕层除外。"
+          : "本片启用底部字幕：舞台底部 190px 是字幕安全带，正文、关键数字、图表和高对比装饰不得进入；字幕层除外。";
     const typography = options.typography || {};
     const fontPreset = typography.fontSize || "large";
     const densityPreset = typography.density || "balanced";
@@ -388,11 +438,14 @@ const runners = {
       `- ./article.md ./script.md ./outline.md 已定稿（不要改它们）`,
       `- ./presentation/ 已用主题 ${theme} 脚手架完成，01-example 已删除`,
       avatarLayout,
+      subtitleLayout,
+      `数字人与字幕同时启用时，正文可用区域必须同时避开两者安全区，取安全区并集。`,
       `本作品排版预设：${fontRule}；${densityRule}。这是产品配置，不修改 Skill 真源。`,
       ``,
       `任务：按 outline.md 把全部章节开发完成。规范（必须照做）：`,
       `- 每章开发前重读 ${skill}/references/CHAPTER-CRAFT.md（单一必读入口）`,
       `- 开始每章前必须更新 presentation/.videoforge-chapter-progress.json，格式为 {"current":当前序号,"total":总章节数,"chapter":"章节目录名","status":"generating","message":"正在生成本章画面"}`,
+      `- 进度文件必须通过 write_file 工具按 UTF-8 写入；禁止用 run_command、PowerShell、cmd 重定向或 Out-File 写这个文件`,
       `- 每章代码与自检完成后，立刻把本章注册进 src/registry/chapters.ts 并运行 npx tsc --noEmit；注册成功后才能开始下一章，确保用户可以逐章预览，不得等全部章节生成后才统一注册`,
       `- 每章代码与自检完成后把同一文件的 status 改为 "checking"、message 改为 "本章完成，正在检查"，再开始下一章；全部完成后写 status "done"`,
       `- 每章独立文件夹 + 独立 CSS 前缀 + narrations.ts（长度 = step 数）`,
@@ -403,7 +456,22 @@ const runners = {
       `- 可以并行使用子任务加速，但最终交付要整体一致`,
       `不要停下来向用户提问。全部做完、tsc 通过后退出。`,
     ].join("\n");
-    return runAgent({ jobId: job.id, stage: "chapter_gen", cwd: job.workspace, prompt });
+    const generated = await runAgent({ jobId: job.id, stage: "chapter_gen", cwd: job.workspace, prompt });
+    if (!generated.ok) return generated;
+    try {
+      const synchronized = synchronizePresentationThemeFiles({
+        workspace: job.workspace,
+        skillRoot: skill,
+        theme,
+      });
+      if (synchronized.drifted) {
+        logEvent(job.id, "chapter_gen", `检测到生成结果主题漂移，已强制恢复为产品选定主题：${theme}`);
+      }
+      const checked = await typecheckPresentation(join(job.workspace, "presentation"), job.id, "chapter_gen");
+      return checked.ok ? generated : checked;
+    } catch (error) {
+      return { ok: false, note: `主题一致性校验失败：${error.message}` };
+    }
   },
 
   /**
@@ -638,25 +706,35 @@ export async function runStage(job) {
 export async function runFeedback(job, { chapter, message, phase, onProgress = () => {} }) {
   onProgress(10, "正在理解你的修改要求");
   const skill = config.skills.webVideoPresentation;
-  let scopeLine = ["原文确认", "文案确认"].includes(phase)
-    ? `当前查看“原文确认”：只允许修改 article.md，不得修改其他文件。`
-    : phase === "口播稿审阅"
+  const options = jobOptions(job);
+  let scopeLine = phase === "口播稿审阅"
       ? `当前查看“口播稿审阅”：只允许修改 script.md；若章节标题变化，可同步 outline.md 的对应标题。不得修改 presentation。`
       : phase === "选择风格"
         ? `当前查看“选择风格”：只解释可执行的风格调整，不修改稿件；具体主题和数字人占位由界面控件保存。`
         : chapter
           ? `本次只允许修改 presentation/src/chapters/${chapter}/ 内的文件（如结构变化才允许动 chapters.ts / useStepper.ts 的 STORAGE_KEY）。`
-          : `当前查看“${phase || "画面"}”：只允许修改 presentation 内与反馈直接相关的文件，改动范围尽量小。`;
+          : phase === "逐页生成"
+            ? `本次是全局画面修改：检查 presentation/src/chapters/ 下全部章节，只修改与用户要求直接相关的页面；每个受影响章节都要完成类型检查。`
+            : `当前查看“${phase || "画面"}”：只允许修改 presentation 内与反馈直接相关的文件，改动范围尽量小。`;
   if (phase === "配音字幕") {
     scopeLine = `当前环节只允许修改 narration、字幕和音频相关文件，不得修改 presentation 的布局、主题或章节正文。`;
   } else if (phase === "数字人") {
     scopeLine = `当前环节只允许修改数字人素材、口型视频接入和相关配置，不得修改文案、口播稿、主题或页面布局。`;
   }
+  const subtitlePosition = options.subtitle?.position || "bottom";
+  const subtitleSafety = options.subtitle?.enabled === false
+    ? "本作品未启用字幕，无字幕安全带要求。"
+    : subtitlePosition === "top"
+      ? "本作品启用顶部字幕，顶部 170px 必须保持为无正文安全带。"
+      : subtitlePosition === "lower-third"
+        ? "本作品启用下三分之一字幕，底部 290px 必须保持为无正文安全带。"
+        : "本作品启用底部字幕，底部 190px 必须保持为无正文安全带。";
   const prompt = [
     `当前目录是一个 VideoForge 作品工作区，用户正在“${phase || "画面调试"}”环节提出修改反馈。`,
     `用户反馈：${message}`,
     scopeLine,
     `严格执行最小改动：用户只要求样式时，禁止修改任何可见文案、narrations.ts、step 数和组件结构；用户只要求文案时，禁止改布局和样式。`,
+    `${subtitleSafety} 安全带内不得放正文、关键数字、图表或高对比装饰；数字人与字幕同时启用时取两者安全区并集。`,
     `如果作品启用了数字人，右侧讲师安全区必须保持为空，不得加入卡片、摘要、图表或装饰内容；只能放数字人视频或低对比度的占位提示。`,
     `修改前后必须自行检查 git diff（即使项目未纳入 git，也要逐文件核对），发现超出用户要求的改动必须撤回。`,
     `修改时遵守 ${skill}/references/CHAPTER-CRAFT.md 的规范（主题 token / 字号 ≥20px / 反AI味）。`,
@@ -667,7 +745,7 @@ export async function runFeedback(job, { chapter, message, phase, onProgress = (
     `检查结果：列出实际执行的检查与结果；未执行的检查要如实说明。`,
   ].join("\n");
   onProgress(16, "已限定修改范围，正在启动模型");
-  const usageOperation = ["原文确认", "文案确认", "口播稿审阅"].includes(phase)
+  const usageOperation = phase === "口播稿审阅"
     ? "text-refine"
     : phase === "配音字幕"
       ? "audio-refine"

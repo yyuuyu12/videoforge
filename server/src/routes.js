@@ -7,6 +7,7 @@ import { fetchArticleText, runDiscovery } from "./workers/discovery.js";
 import { approveGate, retryJob } from "./workers/pipeline.js";
 import { runFeedback, STAGES } from "./stages.js";
 import { previewStatus, startPreview, stopPreview } from "./preview.js";
+import { decodeUtf8OrGb18030 } from "./textEncoding.js";
 import { renderJob } from "./render.js";
 import { loadSettings, publicSettings, saveSettings } from "./settings.js";
 import { testLlmConnection } from "./providers.js";
@@ -127,7 +128,8 @@ function chapterGeneration(job) {
   const total = Math.max(expected, chapters.length);
   let liveProgress = null;
   try {
-    liveProgress = JSON.parse(readFileSync(join(job.workspace, "presentation", ".videoforge-chapter-progress.json"), "utf8"));
+    const progressBytes = readFileSync(join(job.workspace, "presentation", ".videoforge-chapter-progress.json"));
+    liveProgress = JSON.parse(decodeUtf8OrGb18030(progressBytes));
   } catch {}
   const liveCompleted = liveProgress
     ? Math.max(0, Number(liveProgress.current || 1) - (liveProgress.status === "done" ? 0 : 1))
@@ -927,7 +929,7 @@ api.post("/jobs/:id/feedback", async (req, res) => {
   if (!job) return res.status(404).json({ error: "not found" });
   const { chapter, message, phase } = req.body ?? {};
   if (!message) return res.status(400).json({ error: "message required" });
-  const feedbackPhases = ["原文确认", "文案确认", "口播稿审阅", "逐页生成", "配音字幕", "数字人"];
+  const feedbackPhases = ["口播稿审阅", "逐页生成", "配音字幕", "数字人"];
   const previewAffectingPhases = new Set(["逐页生成", "配音字幕", "数字人"]);
   if (!feedbackPhases.includes(phase)) {
     return res.status(409).json({ error: "当前环节不支持对话修改" });
