@@ -3,6 +3,7 @@ dist/
 settings.local.json
 config.json
 data.db
+data.db-*
 workspaces/*
 !workspaces/package.json
 !workspaces/package-lock.json

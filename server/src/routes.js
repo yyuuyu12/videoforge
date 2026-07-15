@@ -15,6 +15,7 @@ import { health as heygemHealth } from "./heygem.js";
 import { extractDouyin } from "./douyin.js";
 import { searchTopics } from "./search.js";
 import { retryExtraction } from "./workers/extractions.js";
+import { createSourceDocument } from "./sourceDocument.js";
 
 export const api = Router();
 
@@ -575,10 +576,11 @@ api.post("/articles/:id/select", async (req, res) => {
   const jobId = Number(jobRow.lastInsertRowid);
   const workspace = join(config.workspacesRoot, `job-${jobId}`);
   mkdirSync(workspace, { recursive: true });
-  writeFileSync(
-    join(workspace, "article.md"),
-    `# ${article.title}\n\n${content}\n\n---\n\n来源：${article.url ?? "手动提供"}\n`,
-  );
+  writeFileSync(join(workspace, "article.md"), createSourceDocument({
+    title: article.title,
+    content,
+    source: article.url,
+  }));
   updateJob(jobId, { workspace, stage: "gate_source", status: "waiting_approval", error: null });
   db.prepare("UPDATE articles SET status = 'selected' WHERE id = ?").run(article.id);
   logEvent(jobId, "init", `workspace created: ${workspace}`);
@@ -618,7 +620,7 @@ api.delete("/jobs/:id", (req, res) => {
     return res.status(409).json({ error: "作品工作区路径异常，已停止删除" });
   }
 
-  stopDevServer(job.id);
+  stopPreview(job.id);
   try {
     if (existsSync(workspace)) rmSync(workspace, { recursive: true, force: true });
   } catch (error) {
@@ -675,12 +677,16 @@ api.post("/douyin/extractions/:id/create-work", (req, res) => {
   if (extraction.job_id) return res.json({ jobId: extraction.job_id, existing: true });
   const article = db.prepare("SELECT * FROM articles WHERE id = ?").get(extraction.article_id);
   if (!article?.content || article.content.length < 200) return res.status(422).json({ error: "提取文案不完整" });
-  const jobRow = db.prepare("INSERT INTO jobs (article_id, title, workspace) VALUES (?, ?, '')").run(article.id, article.title);
+  const jobRow = db.prepare("INSERT INTO jobs (article_id, title, workspace, stage, status) VALUES (?, ?, '', 'gate_source', 'waiting_approval')").run(article.id, article.title);
   const jobId = Number(jobRow.lastInsertRowid);
   const workspace = join(config.workspacesRoot, `job-${jobId}`);
   mkdirSync(workspace, { recursive: true });
-  writeFileSync(join(workspace, "article.md"), `# ${article.title}\n\n${article.content}\n\n---\n\n来源：${article.url ?? "手动提供"}\n`);
-  updateJob(jobId, { workspace, status: "queued" });
+  writeFileSync(join(workspace, "article.md"), createSourceDocument({
+    title: article.title,
+    content: article.content,
+    source: article.url,
+  }));
+  updateJob(jobId, { workspace, stage: "gate_source", status: "waiting_approval", error: null });
   db.prepare("UPDATE articles SET status = 'selected' WHERE id = ?").run(article.id);
   db.prepare("UPDATE douyin_extractions SET job_id = ?, updated_at = datetime('now') WHERE id = ?").run(jobId, extraction.id);
   logEvent(jobId, "init", `workspace created from extraction ${extraction.id}: ${workspace}`);
@@ -977,6 +983,21 @@ api.get("/jobs/:id/files/:name", (req, res) => {
   } catch {
     res.json({ ok: false, name, content: null });
   }
+});
+
+api.put("/jobs/:id/files/article.md", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  if (job.stage !== "gate_source" || job.status !== "waiting_approval") {
+    return res.status(409).json({ error: "只有在原文确认步骤才能修改原文" });
+  }
+  const content = String(req.body?.content || "").replace(/\r\n?/g, "\n").trim();
+  if (content.length < 200) return res.status(422).json({ error: "原文内容不足 200 字，请补充完整后再保存" });
+  if (content.length > 200_000) return res.status(413).json({ error: "原文超过 20 万字，暂时无法保存" });
+  const saved = `${content}\n`;
+  writeFileSync(join(job.workspace, "article.md"), saved, "utf8");
+  logEvent(job.id, "gate_source", `原文已手动调整并保存 · ${saved.length} 字符`);
+  res.json({ ok: true, name: "article.md", content: saved });
 });
 
 // ---- per-job preview dev server ----------------------------------------------

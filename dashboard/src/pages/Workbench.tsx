@@ -167,6 +167,9 @@ export function Workbench({
   const [previewError, setPreviewError] = useState("");
   const [previewRevision, setPreviewRevision] = useState(0);
   const [renderConfirmOpen, setRenderConfirmOpen] = useState(false);
+  const [sourceEditing, setSourceEditing] = useState(false);
+  const [sourceDraft, setSourceDraft] = useState("");
+  const [sourceSaveState, setSourceSaveState] = useState("");
   const lastCurrent = useRef<number | null>(null);
   const load = () =>
     api
@@ -179,6 +182,11 @@ export function Workbench({
     return () => clearInterval(timer);
   }, [jobId]);
   useEffect(() => {
+    setSourceEditing(false);
+    setSourceDraft("");
+    setSourceSaveState("");
+  }, [jobId]);
+  useEffect(() => {
     ["article.md", "script.md", "outline.md"].forEach((name) =>
       api
         .jobFile(jobId, name)
@@ -186,6 +194,11 @@ export function Workbench({
         .catch(() => {}),
     );
   }, [jobId, job?.stage]);
+  useEffect(() => {
+    if (!sourceEditing && files["article.md"] !== null && files["article.md"] !== undefined) {
+      setSourceDraft(files["article.md"] || "");
+    }
+  }, [files["article.md"], sourceEditing]);
   useEffect(() => {
     api
       .avatarAssets()
@@ -318,8 +331,8 @@ export function Workbench({
       setBusy(false);
     }
   };
-  const textView = (content: string | null | undefined, empty: string) => (
-    <article className="vf-script">
+  const textView = (content: string | null | undefined, empty: string, className = "") => (
+    <article className={`vf-script ${className}`.trim()}>
       {content ? (
         content
           .split("\n")
@@ -394,13 +407,51 @@ export function Workbench({
             <b>{files["article.md"] ? "原文已载入" : "正在读取原文"}</b>
             <small>{files["article.md"] ? `约 ${files["article.md"]!.length} 字符` : "请稍候"}</small>
           </div>
-          {textView(files["article.md"], "正在读取原始内容…")}
+          <div className="vf-source-review-heading">
+            <div><b>原文内容</b><span>{sourceEditing ? "编辑中" : "阅读排版"}</span></div>
+            {job.stage === "gate_source" && !sourceEditing && (
+              <button className="vf-secondary" onClick={() => { setSourceDraft(files["article.md"] || ""); setSourceSaveState(""); setSourceEditing(true); }}>
+                编辑原文
+              </button>
+            )}
+          </div>
+          {sourceEditing ? (
+            <div className="vf-source-editor">
+              <textarea
+                aria-label="编辑原文"
+                value={sourceDraft}
+                onChange={(event) => { setSourceDraft(event.target.value); setSourceSaveState(""); }}
+              />
+              <div className="vf-source-editor-footer">
+                <span>{sourceDraft.length} 字符</span>
+                <div className="vf-action-cluster">
+                  <button className="vf-secondary" disabled={busy} onClick={() => { setSourceDraft(files["article.md"] || ""); setSourceEditing(false); setSourceSaveState(""); }}>取消</button>
+                  <button className="vf-primary" disabled={busy || sourceDraft.trim().length < 200} onClick={async () => {
+                    setBusy(true);
+                    setSourceSaveState("");
+                    try {
+                      const result = await api.saveSourceFile(job.id, sourceDraft);
+                      setFiles((old) => ({ ...old, ["article.md"]: result.content }));
+                      setSourceDraft(result.content);
+                      setSourceEditing(false);
+                      setSourceSaveState("原文调整已保存");
+                    } catch (error) {
+                      setSourceSaveState(error instanceof Error ? error.message : "原文保存失败");
+                    } finally {
+                      setBusy(false);
+                    }
+                  }}>{busy ? "正在保存…" : "保存调整"}</button>
+                </div>
+              </div>
+            </div>
+          ) : textView(files["article.md"], "正在读取原始内容…", "vf-source-script")}
+          {sourceSaveState && <p className="vf-source-save-state" role="status">{sourceSaveState}</p>}
           {job.stage === "gate_source" && (
             <div className="vf-step-actionbar">
               <div><b>原文检查完成了吗？</b><span>也可以先在右侧对话中提出修改，再确认进入下一步。</span></div>
               <button
                 className="vf-primary"
-                disabled={busy || !files["article.md"]}
+                disabled={busy || sourceEditing || !files["article.md"]}
                 onClick={async () => {
                   setBusy(true);
                   try {
@@ -412,7 +463,7 @@ export function Workbench({
                   }
                 }}
               >
-                {busy ? "正在进入下一步…" : "确认原文，生成口播稿"}
+                {busy ? "正在进入下一步…" : sourceEditing ? "请先保存原文" : "确认原文，开始生成口播稿"}
               </button>
             </div>
           )}

@@ -368,6 +368,11 @@ export const api = {
     req<{ ok: boolean; name: string; content: string | null }>(
       `/jobs/${id}/files/${name}`,
     ),
+  saveSourceFile: (id: number, content: string) =>
+    req<{ ok: boolean; name: string; content: string }>(`/jobs/${id}/files/article.md`, {
+      method: "PUT",
+      body: JSON.stringify({ content }),
+    }),
   devStart: (id: number) =>
     req<{ running: boolean; url?: string }>(`/jobs/${id}/devserver/start`, {
       method: "POST",
