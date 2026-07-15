@@ -109,4 +109,6 @@ export function useAudioPlayer({
       }
     };
   }, [src, mode, trailMs, estimateFallbackMs, autoStarted]);
+
+  return { getAudioEl: () => audioRef.current };
 }
