@@ -61,6 +61,27 @@ test("chapter generation repairs low quality instead of entering approval", asyn
   assert.match(pipeline, /audit\.score.*90/);
 });
 
+test("chapter progress supports numbered heading outlines and validates themes", async () => {
+  const routes = await readFile(new URL("./routes.js", import.meta.url), "utf8");
+  assert.match(routes, /outline\.match\(\/\^##\\s\+\\d\+\[\.\)\]/);
+  assert.match(routes, /第\[一二三四五六七八九十百\]\+章/);
+  assert.match(routes, /PRESENTATION_THEMES\.has\(req\.body\.theme\)/);
+  assert.match(routes, /narration\.match\(\/\["'`\]/);
+});
+
+test("narration extraction accepts minified chapter imports", async () => {
+  const extractor = await readFile(
+    new URL("../../skills/web-video-presentation/templates/scripts/extract-narrations.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(extractor, /from\\s\*\["'\]/);
+});
+
+test("avatar layout audit accepts an absolute right-side reservation", async () => {
+  const routes = await readFile(new URL("./routes.js", import.meta.url), "utf8");
+  assert.match(routes, /right:\\s\*\(44\[0-9\]/);
+});
+
 test("avatar audio follows the presentation manifest instead of folder sorting", async () => {
   const root = await mkdtemp(join(tmpdir(), "videoforge-avatar-order-"));
   const audioRoot = join(root, "public", "audio");

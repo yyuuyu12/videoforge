@@ -49,7 +49,7 @@ async function readChapterOrder(): Promise<{ id: string; folder: string }[]> {
 
   for (const m of src.matchAll(/id:\s*["']([^"']+)["']/g)) ids.push(m[1]!);
   for (const m of src.matchAll(
-    /from\s+["']\.\.\/chapters\/([^"'\/]+)\/narrations["']/g,
+    /from\s*["']\.\.\/chapters\/([^"'\/]+)\/narrations["']/g,
   )) {
     // We map by import order; pair 1:1 with `ids`. Both orders are the
     // chapter declaration order in CHAPTERS so they line up.

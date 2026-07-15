@@ -20,6 +20,7 @@ import { retryExtraction } from "./workers/extractions.js";
 import { createSourceDocument } from "./sourceDocument.js";
 
 export const api = Router();
+const PRESENTATION_THEMES = new Set(["midnight-press", "swiss-ikb", "newsroom", "bold-signal"]);
 
 api.get("/health", (_req, res) => res.json({ ok: true }));
 api.get("/meta", (_req, res) => res.json({ stages: STAGES, theme: config.theme }));
@@ -91,6 +92,8 @@ function chapterGeneration(job) {
   try {
     const outline = readFileSync(join(job.workspace, "outline.md"), "utf8");
     expected = (outline.match(/^\|\s*\d{2}:\d{2}\s*-\s*\d{2}:\d{2}\s*\|/gm) || []).length;
+    if (!expected) expected = (outline.match(/^##\s+\d+[.)]\s+.+$/gm) || []).length;
+    if (!expected) expected = (outline.match(/^##\s+(?:开场(?:[：:]|\s|$)|第[一二三四五六七八九十百]+章(?:[：:]|\s|$)).+$/gm) || []).length;
   } catch {}
   const reviewRows = db.prepare("SELECT chapter_key, status FROM chapter_reviews WHERE job_id = ?").all(job.id);
   const reviews = new Map(reviewRows.map((row) => [row.chapter_key, row.status]));
@@ -107,9 +110,9 @@ function chapterGeneration(job) {
         let steps = 0;
         if (narrationFile) {
           const narration = readFileSync(join(dir, narrationFile), "utf8");
-          const lines = narration.match(/^\s*["'`](.+?)["'`],?\s*$/gm) || [];
+          const lines = narration.match(/["'`](?:\\.|[^"'`])*["'`]/g) || [];
           steps = lines.length;
-          const first = lines[0]?.replace(/^\s*["'`]|["'`],?\s*$/g, "").trim();
+          const first = lines[0]?.slice(1, -1).trim();
           if (!registryTitles.has(chapterId) && first) title = first.length > 30 ? `${first.slice(0, 30)}…` : first;
         }
         // Chapters may use the shared presentation stylesheet instead of a per-chapter CSS file.
@@ -768,6 +771,9 @@ api.put("/jobs/:id/options", (req, res) => {
   }
   let meta = {};
   try { meta = JSON.parse(job.meta || "{}"); } catch {}
+  if (req.body?.theme && !PRESENTATION_THEMES.has(req.body.theme)) {
+    return res.status(400).json({ error: "不支持这个画面主题，请重新选择" });
+  }
   meta = { ...meta, ...(req.body ?? {}) };
   updateJob(job.id, { meta: JSON.stringify(meta) });
   res.json({ ...getJob(job.id), meta });
@@ -826,6 +832,7 @@ api.get("/jobs/:id/audit", async (req, res) => {
       chapter: entry.name,
       reserved:
         /padding-right:\s*(44[0-9]|45[0-9]|6\d\d|7\d\d)px/.test(content) ||
+        /right:\s*(44[0-9]|45[0-9]|6\d\d|7\d\d)px/.test(content) ||
         /grid-template-columns:[^;]*(44[0-9]|45[0-9]|6\d\d|7\d\d)px/.test(content) ||
         /(?:reserve(?:d)?|presenter|avatar)[^{]*\{[^}]*width:\s*(44[0-9]|45[0-9]|6\d\d|7\d\d)px/is.test(content),
     };
