@@ -1,12 +1,14 @@
 import { useEffect, useState } from "react";
-import { api, type Job } from "../api";
+import { api, type Job, type Settings } from "../api";
 import { workStatus } from "../lib/statusText";
 
 export function Works({ onOpen, onCreate }: { onOpen: (id: number) => void; onCreate: () => void }) {
   const [works, setWorks] = useState<Job[]>([]);
   const [deletingId, setDeletingId] = useState<number | null>(null);
   const [pendingDelete, setPendingDelete] = useState<Job | null>(null);
+  const [settings, setSettings] = useState<Settings | null>(null);
   const [deleteError, setDeleteError] = useState("");
+  useEffect(() => { api.settings().then(setSettings).catch(() => {}); }, []);
   useEffect(() => {
     const load = () => api.jobs().then(setWorks).catch(() => {});
     load();
@@ -33,6 +35,19 @@ export function Works({ onOpen, onCreate }: { onOpen: (id: number) => void; onCr
       <div><p className="vf-kicker">我的作品</p><h2>把想法做成一支视频</h2><p>每一支作品都保留在这里，随时继续制作。</p></div>
       <button className="vf-primary" onClick={onCreate}>+ 新建作品</button>
     </section>
+    {settings && (() => {
+      const llmReady = settings.llm.mode === "subscription" || settings.llm.apiKeyState.set;
+      const minimaxReady = settings.minimax.apiKeyState.set;
+      if (llmReady && minimaxReady) return null;
+      return <section className="vf-setup-card" role="status">
+        <b>开始之前，先完成两项配置（右上角「设置」页）</b>
+        <ul>
+          <li>{llmReady ? "✅" : "⬜"} 模型服务：填写 API Key 并点「测试连接」（或选择本机订阅模式）</li>
+          <li>{minimaxReady ? "✅" : "⬜"} MiniMax 配音：填写你自己的 API Key 并测试</li>
+          <li>🎙️ 可选：用「声音克隆向导」克隆你自己的声音（费用走你的 MiniMax 账号，约 9.9 元/次）</li>
+        </ul>
+      </section>;
+    })()}
     {deleteError && <p className="vf-delete-error" role="alert">{deleteError}</p>}
     {works.length ? <section className="vf-work-grid">{works.map((work) => {
       const status = workStatus(work);

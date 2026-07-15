@@ -93,3 +93,11 @@ $env:HEYGEM_DIR='F:\other\ZHhinengti\aigc-human\python-modules\hdModule'
 - HeyGem 未就绪：检查 `7861/health` 的 `processor_ready`。
 - 预览空白：在工作台点击“加载预览”，检查对应 `5300+` 端口。
 - 服务重启：作品和抖音提取任务会从 SQLite 恢复。
+
+## 7. 便携包打包（分发用）
+
+```powershell
+powershell -ExecutionPolicy Bypass -File scripts\package-portable.ps1
+```
+
+产出 `output/VideoForge-portable/`（~445MB）：Node 随包、服务端运行时依赖干净安装、共享演示依赖随包（首启自动复制到用户数据目录，零网络）。使用机器需要系统 Chrome/Edge 与 PATH 中的 ffmpeg（导出成片用）。数据落 `%APPDATA%\VideoForge`。

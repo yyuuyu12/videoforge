@@ -1,8 +1,11 @@
 import { useEffect, useState } from "react";
-import { api, type DouyinExtraction } from "../api";
+import { api, type DouyinExtraction , type Settings } from "../api";
 
 export function NewWork({ onCreated }: { onCreated: (id: number) => void }) {
   const [mode, setMode] = useState<"text" | "url" | "douyin">("text");
+  const [settings, setSettings] = useState<Settings | null>(null);
+  useEffect(() => { api.settings().then(setSettings).catch(() => {}); }, []);
+  const tikhubReady = settings ? settings.tikhub.apiKeyState.set : true;
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [url, setUrl] = useState("");
@@ -76,9 +79,11 @@ export function NewWork({ onCreated }: { onCreated: (id: number) => void }) {
           </button>
           <button
             className={mode === "douyin" ? "selected" : ""}
+            disabled={!tikhubReady}
+            title={tikhubReady ? undefined : "需要先在「设置」页填写 TikHub Key"}
             onClick={() => setMode("douyin")}
           >
-            抖音链接
+            抖音链接{!tikhubReady && "（未配置）"}
           </button>
         </div>
         <label>

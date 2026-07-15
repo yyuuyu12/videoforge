@@ -1,4 +1,5 @@
 import { readFileSync, existsSync, mkdirSync, copyFileSync } from "node:fs";
+import { spawnSync } from "node:child_process";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -33,8 +34,17 @@ function provisionDataRoot(dataRoot) {
     const dst = join(dataRoot, "workspaces", name);
     if (existsSync(src) && !existsSync(dst)) copyFileSync(src, dst);
   }
-  // 共享依赖缺失时提示（不在启动路径里静默跑分钟级 npm install）
-  if (!existsSync(join(dataRoot, "workspaces", "node_modules"))) {
+  // 便携分发：随包携带的共享依赖一次性本地复制到数据目录（无需网络/npm）。
+  const bundledModules = join(ROOT, "workspaces", "node_modules");
+  const dataModules = join(dataRoot, "workspaces", "node_modules");
+  if (!existsSync(dataModules) && existsSync(bundledModules)) {
+    console.log("[dataRoot] 正在复制共享演示依赖（一次性，约 80MB）…");
+    const copied = spawnSync("robocopy", [bundledModules, dataModules, "/E", "/NFL", "/NDL", "/NJH", "/NJS", "/NP"], { shell: false });
+    // robocopy 退出码 <8 均为成功（1=有文件复制）
+    if (copied.status != null && copied.status >= 8) {
+      console.warn(`[dataRoot] 依赖复制失败（robocopy ${copied.status}）——预览构建前请手动补齐 workspaces/node_modules`);
+    }
+  } else if (!existsSync(dataModules)) {
     console.warn(`[dataRoot] ${join(dataRoot, "workspaces")} 缺少 node_modules——` +
       `请执行一次：npm install --prefix "${join(dataRoot, "workspaces")}"（预览构建前需要）`);
   }
