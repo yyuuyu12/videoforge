@@ -16,3 +16,10 @@ test("presentation audio hook exposes its audio element", async () => {
   const hook = await readFile(`${templateRoot}/hooks/useAudioPlayer.ts`, "utf8");
   assert.match(hook, /return\s+\{\s*getAudioEl:\s*\(\)\s*=>\s*audioRef\.current\s*\}/);
 });
+
+test("presentation stepper accepts a chapter query parameter", async () => {
+  const hook = await readFile(`${templateRoot}/hooks/useStepper.ts`, "utf8");
+  assert.match(hook, /new URLSearchParams\(window\.location\.search\)/);
+  assert.match(hook, /get\(["']chapter["']\)/);
+  assert.match(hook, /if \(requested\) return requested/);
+});

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import {
   api,
   type AvatarAsset,
@@ -32,6 +32,21 @@ const conversationalPhases = new Set([
   "配音字幕",
   "数字人",
 ]);
+const previewAffectingFeedbackPhases = new Set(["逐页生成", "配音字幕", "数字人"]);
+
+function syncPreviewChapter(chapterIndex: number) {
+  const cursor = JSON.stringify({ chapter: chapterIndex, step: 0 });
+  try {
+    Object.keys(window.localStorage)
+      .filter((key) => /^presentation-cursor-v\d+$/.test(key))
+      .forEach((key) => window.localStorage.setItem(key, cursor));
+    for (let version = 1; version <= 10; version += 1) {
+      window.localStorage.setItem(`presentation-cursor-v${version}`, cursor);
+    }
+  } catch {
+    // The chapter query parameter still handles new presentations when storage is unavailable.
+  }
+}
 const themes = [
   {
     id: "midnight-press",
@@ -165,12 +180,15 @@ export function Workbench({
   const [avatarState, setAvatarState] = useState("");
   const [regenerateState, setRegenerateState] = useState("");
   const [previewError, setPreviewError] = useState("");
+  const [previewNotice, setPreviewNotice] = useState("");
   const [previewRevision, setPreviewRevision] = useState(0);
   const [renderConfirmOpen, setRenderConfirmOpen] = useState(false);
   const [sourceEditing, setSourceEditing] = useState(false);
   const [sourceDraft, setSourceDraft] = useState("");
   const [sourceSaveState, setSourceSaveState] = useState("");
   const lastCurrent = useRef<number | null>(null);
+  const trackedFeedbackIds = useRef(new Set<number>());
+  const feedbackStatuses = useRef(new Map<number, string>());
   const load = () =>
     api
       .job(jobId)
@@ -185,6 +203,9 @@ export function Workbench({
     setSourceEditing(false);
     setSourceDraft("");
     setSourceSaveState("");
+    setPreviewNotice("");
+    trackedFeedbackIds.current.clear();
+    feedbackStatuses.current.clear();
   }, [jobId]);
   useEffect(() => {
     ["article.md", "script.md", "outline.md"].forEach((name) =>
@@ -236,6 +257,28 @@ export function Workbench({
     if (selectedChapter && chapters.some((chapter) => chapter.key === selectedChapter)) return;
     setSelectedChapter((chapters.find((chapter) => chapter.status !== "approved") || chapters[0]).key);
   }, [job?.chapterGeneration?.chapters, selectedChapter]);
+  const selectedChapterIndex = job?.chapterGeneration?.chapters
+    .find((chapter) => chapter.key === selectedChapter)?.index;
+  useLayoutEffect(() => {
+    if (selectedChapterIndex) syncPreviewChapter(selectedChapterIndex - 1);
+  }, [jobId, selectedChapterIndex]);
+  useEffect(() => {
+    if (!job) return;
+    for (const item of job.feedback) {
+      const previous = feedbackStatuses.current.get(item.id);
+      feedbackStatuses.current.set(item.id, item.status);
+      if (!trackedFeedbackIds.current.has(item.id)) continue;
+      if (item.status === "done" && previous !== "done") {
+        trackedFeedbackIds.current.delete(item.id);
+        if (item.phase && previewAffectingFeedbackPhases.has(item.phase)) {
+          setPreviewRevision((value) => value + 1);
+          setPreviewNotice("修改完成，左侧预览已自动刷新");
+        }
+      } else if (item.status === "failed") {
+        trackedFeedbackIds.current.delete(item.id);
+      }
+    }
+  }, [job]);
   const meta = useMemo(() => (job ? parseMeta(job) : {}), [job]);
   if (!job || selected === null) return <WorkbenchLoading />;
   const current = phaseIndex(job);
@@ -255,6 +298,9 @@ export function Workbench({
   const styleEditable = job.stage === "gate_style" && job.status === "waiting_approval";
   const canView = (index: number) => index <= current || job.status === "done";
   const previewUrl = job.devServer.url;
+  const chapterPreviewUrl = previewUrl && activeChapter
+    ? `${previewUrl}${previewUrl.includes("?") ? "&" : "?"}chapter=${activeChapter.index - 1}&revision=${previewRevision}`
+    : previewUrl;
   const activeProgressEvent = job.events.find(
     (event) => event.stage === job.stage && event.message.startsWith("progress|"),
   );
@@ -722,7 +768,10 @@ export function Workbench({
                   <button
                     key={chapter.key}
                     className={selectedChapter === chapter.key ? "selected" : ""}
-                    onClick={() => setSelectedChapter(chapter.key)}
+                    onClick={() => {
+                      syncPreviewChapter(chapter.index - 1);
+                      setSelectedChapter(chapter.key);
+                    }}
                   >
                     <i className={chapter.status}>
                       {chapter.status === "approved" ? "✓" : chapter.index}
@@ -774,7 +823,7 @@ export function Workbench({
               key={`chapters-${previewRevision}`}
               className="vf-live-preview"
               title="作品预览"
-              src={previewUrl}
+              src={chapterPreviewUrl}
               allow="autoplay; fullscreen"
             />
           ) : (
@@ -790,7 +839,7 @@ export function Workbench({
             {previewUrl && (
               <a
                 className="vf-action-link"
-                href={previewUrl}
+                href={chapterPreviewUrl}
                 target="_blank"
                 rel="noreferrer"
               >
@@ -808,6 +857,7 @@ export function Workbench({
             )}
           </div>
           {previewError && <p className="vf-inline-error">预览启动失败：{previewError}</p>}
+          {previewNotice && <p className="vf-inline-success" role="status">{previewNotice}</p>}
         </>
       );
     if (selected === 4)
@@ -1222,7 +1272,10 @@ export function Workbench({
             <button
               onClick={async () => {
                 if (!message.trim()) return;
-                await api.sendFeedback(job.id, chapterScope, message, activePhase);
+                const submitted = await api.sendFeedback(job.id, chapterScope, message, activePhase);
+                trackedFeedbackIds.current.add(submitted.feedbackId);
+                feedbackStatuses.current.set(submitted.feedbackId, "running");
+                setPreviewNotice("");
                 setMessageDrafts((drafts) => ({ ...drafts, [draftKey]: "" }));
                 await load();
               }}

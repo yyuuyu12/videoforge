@@ -360,7 +360,7 @@ export const api = {
     message: string,
     phase?: string,
   ) =>
-    req(`/jobs/${id}/feedback`, {
+    req<{ feedbackId: number }>(`/jobs/${id}/feedback`, {
       method: "POST",
       body: JSON.stringify({ chapter, message, phase }),
     }),

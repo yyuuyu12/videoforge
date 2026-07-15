@@ -921,13 +921,14 @@ api.post("/jobs/:id/retry", (req, res) => {
   res.json({ ok: retryJob(Number(req.params.id), req.body?.stage) });
 });
 
-/** 章节调试反馈：spawn a scoped debug agent, then reload preview manually. */
+/** 对话修改：执行局部修改，并在画面相关阶段重建静态预览。 */
 api.post("/jobs/:id/feedback", async (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "not found" });
   const { chapter, message, phase } = req.body ?? {};
   if (!message) return res.status(400).json({ error: "message required" });
   const feedbackPhases = ["原文确认", "文案确认", "口播稿审阅", "逐页生成", "配音字幕", "数字人"];
+  const previewAffectingPhases = new Set(["逐页生成", "配音字幕", "数字人"]);
   if (!feedbackPhases.includes(phase)) {
     return res.status(409).json({ error: "当前环节不支持对话修改" });
   }
@@ -962,8 +963,34 @@ api.post("/jobs/:id/feedback", async (req, res) => {
     const result = r.ok
       ? (String(r.output || "").trim().slice(-2400) || "具体修改：模型已完成本次调整。\n修改思路：按照你的反馈做了最小范围修改。\n检查结果：任务执行成功。")
       : null;
+    if (r.ok && previewAffectingPhases.has(phase)) {
+      db.prepare("UPDATE feedback SET progress = 86, progress_message = ? WHERE id = ?")
+        .run("修改已完成，正在重建左侧预览", f.lastInsertRowid);
+      try {
+        await startPreview(getJob(job.id) || job);
+        db.prepare("UPDATE feedback SET progress = 96, progress_message = ? WHERE id = ?")
+          .run("预览已重建，正在刷新", f.lastInsertRowid);
+      } catch (previewError) {
+        db.prepare("UPDATE feedback SET status = 'failed', progress = 100, progress_message = ?, error = ?, result = ? WHERE id = ?")
+          .run(
+            "修改已保存，但预览重建失败",
+            `修改已保存，但左侧预览重建失败：${String(previewError.message || previewError).slice(0, 700)}`,
+            result,
+            f.lastInsertRowid,
+          );
+        return;
+      }
+    }
     db.prepare("UPDATE feedback SET status = ?, progress = 100, progress_message = ?, error = ?, result = ? WHERE id = ?")
-      .run(r.ok ? "done" : "failed", r.ok ? "修改完成，结果已刷新" : "修改未完成", error ? String(error).slice(0, 800) : null, result, f.lastInsertRowid);
+      .run(
+        r.ok ? "done" : "failed",
+        r.ok
+          ? (previewAffectingPhases.has(phase) ? "修改完成，左侧预览已刷新" : "修改完成")
+          : "修改未完成",
+        error ? String(error).slice(0, 800) : null,
+        result,
+        f.lastInsertRowid,
+      );
   } catch (error) {
     db.prepare("UPDATE feedback SET status = 'failed', progress = 100, progress_message = '修改未完成', error = ? WHERE id = ?")
       .run(String(error.message || error).slice(0, 800), f.lastInsertRowid);

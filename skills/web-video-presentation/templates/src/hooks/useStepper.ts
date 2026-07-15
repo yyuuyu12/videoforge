@@ -38,6 +38,15 @@ function sanitize(cursor: Cursor, chapters: ChapterDef[]): Cursor {
   return { chapter, step };
 }
 
+function requestedCursor(chapters: ChapterDef[]): Cursor | null {
+  if (typeof window === "undefined") return null;
+  const rawChapter = new URLSearchParams(window.location.search).get("chapter");
+  if (rawChapter === null || rawChapter.trim() === "") return null;
+  const chapter = Number(rawChapter);
+  if (!Number.isInteger(chapter)) return null;
+  return sanitize({ chapter, step: 0 }, chapters);
+}
+
 export function useStepper(
   chapters: ChapterDef[],
   options?: { suppressSpace?: boolean },
@@ -50,6 +59,8 @@ export function useStepper(
   const [cursor, setCursor] = useState<Cursor>(() => {
     const fallback = { chapter: 0, step: 0 };
     if (typeof window === "undefined") return fallback;
+    const requested = requestedCursor(chapters);
+    if (requested) return requested;
     try {
       const raw = window.localStorage.getItem(STORAGE_KEY);
       if (raw) return sanitize(JSON.parse(raw), chapters);
