@@ -101,3 +101,18 @@ powershell -ExecutionPolicy Bypass -File scripts\package-portable.ps1
 ```
 
 产出 `output/VideoForge-portable/`（~445MB）：Node 随包、服务端运行时依赖干净安装、共享演示依赖随包（首启自动复制到用户数据目录，零网络）。使用机器需要系统 Chrome/Edge 与 PATH 中的 ffmpeg（导出成片用）。数据落 `%APPDATA%\VideoForge`。
+
+## 8. 日常迭代与验证规范
+
+四层验证，按成本递增；打包只在发版时做，日常迭代不打包、无安装卸载概念（程序=目录，数据在 %APPDATA%\VideoForge 与包无关）。
+
+| 层级 | 时机 | 动作 | 耗时 |
+|---|---|---|---|
+| L1 语法 | 每次改完代码 | `node --check <改动文件>` + `npm run build` | 秒级 |
+| L2 开发（日常主力） | 改功能后 | 仓库直接跑：重启 `npm start`（或 `npm run server` 自动 watch），浏览器/`curl` 验证；开发机数据就地（旧布局兼容） | 分钟级 |
+| L3 发版 | 发新版给别人前 | `scripts\package-portable.ps1` → `scripts\smoke-portable.ps1`（临时数据目录冷启动三项校验，零残留，自动恢复主服务） | ~3 分钟 |
+| L4 真实验收 | 每周 | 完整出一支真片（同时是稳定性证据与最强回归） | 小时级 |
+
+多设备协同：GitHub master 为同步总线——任一设备 pull → 改 → L1/L2 → commit+push（改完即推）；接手前先 pull 并读 PROJECT-MEMORY 最新日期段。发版：打包 → 冒烟 → 压缩发人；接收方解压双击，升级换目录不丢数据。
+
+工程注意：仓库内 PowerShell 脚本必须带 UTF-8 BOM（PS 5.1 无 BOM 读中文注释会解析错乱）。
