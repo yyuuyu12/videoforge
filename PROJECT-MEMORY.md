@@ -52,6 +52,7 @@
 
 - A6 OpenAI 兼容 LLM 可运行文案与章节工具循环。
 - TikHub 分享链接接口可获取抖音 `aweme_detail`。
+- TikHub 的长视频 `caption` 可能恰好在 1000 字处截断；不得将其标记为完整文案，必须转入原声 ASR。
 - 本机 Whisper medium 可把 586 秒原声转录为 3352 字。
 - MiniMax 已生成真实配音和逐字时间轴。
 - HeyGem 已生成 105 秒数字人视频并拆成章节预览。

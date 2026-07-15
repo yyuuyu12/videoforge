@@ -1,5 +1,6 @@
 import { loadSettings } from "./settings.js";
 import { recordUsage } from "./db.js";
+import { isLikelyTruncatedEmbeddedText } from "./douyinQuality.js";
 
 /**
  * 抖音链接 → 文案（作为选题/文章来源）。
@@ -87,7 +88,8 @@ export async function extractDouyin(input, { onProgress = () => {} } = {}) {
   let script = extractEmbeddedText(item);
   let via = script ? "tikhub-embedded-text" : "";
   const embeddedChars = script.length;
-  if (script && script.length < minimumChars) {
+  const embeddedTextTruncated = isLikelyTruncatedEmbeddedText(script, durationSeconds);
+  if (script && (script.length < minimumChars || embeddedTextTruncated)) {
     script = "";
     via = "";
   }
@@ -97,7 +99,9 @@ export async function extractDouyin(input, { onProgress = () => {} } = {}) {
     message: script
       ? `作品数据包含完整文案 · ${script.length} 字`
       : embeddedChars
-        ? `内嵌文本只有 ${embeddedChars} 字，不是完整字幕，转入原声识别`
+        ? embeddedTextTruncated
+          ? `内嵌文本恰好 ${embeddedChars} 字，疑似 TikHub 字段截断，转入完整原声识别`
+          : `内嵌文本只有 ${embeddedChars} 字，不是完整字幕，转入原声识别`
         : "作品数据没有可用字幕，转入原声识别",
   });
   await onProgress({
