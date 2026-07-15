@@ -1,25 +1,13 @@
 {
+  "//": "全部字段可省略——省略即用内置默认（skills 指向仓库内快照、workspaces 归属 dataRoot、TTS 参数以 skills/article2video/references/DEFAULTS.md 为准）。",
   "port": 5401,
-  "workspacesRoot": "F:/Projects/videoforge/workspaces",
   "theme": "midnight-press",
+  "previewMode": "static",
+  "dataRoot": "C:/Users/<你的用户名>/AppData/Roaming/VideoForge",
   "agent": {
-    "command": "claude",
-    "args": ["-p", "--dangerously-skip-permissions", "--output-format", "text"],
     "timeoutMs": 5400000,
     "maxConcurrent": 1
   },
-  "skills": {
-    "webVideoPresentation": "C:/Users/木木/.claude/skills/web-video-presentation",
-    "videoAvatarSubtitles": "C:/Users/木木/.claude/skills/video-avatar-subtitles"
-  },
-  "tts": {
-    "provider": "minimax-http",
-    "apiKeyEnv": "MINIMAX_API_KEY",
-    "voiceId": "GongheJiucun02",
-    "speed": 1.0
-  },
-  "devServerBasePort": 5300,
-  "previewMode": "static",
   "discovery": {
     "intervalMinutes": 120,
     "autoStart": true

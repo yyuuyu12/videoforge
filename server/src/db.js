@@ -1,8 +1,8 @@
 import { DatabaseSync } from "node:sqlite";
 import { join } from "node:path";
-import { ROOT } from "./config.js";
+import { DATA_ROOT } from "./config.js";
 
-export const db = new DatabaseSync(join(ROOT, "data.db"));
+export const db = new DatabaseSync(join(DATA_ROOT, "data.db"));
 
 db.exec(`
 CREATE TABLE IF NOT EXISTS sources (

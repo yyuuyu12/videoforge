@@ -24,6 +24,17 @@ npm run dashboard
 
 API `5401`，Dashboard `5400`。作品预览由后台动态分配 `5300-5399`。
 
+## 1.5 数据目录（dataRoot）
+
+数据（`data.db`、`settings.local.json`、`workspaces/`、`logs/`）与代码分离，解析优先级：
+
+1. 环境变量 `VIDEOFORGE_DATA_DIR`
+2. `config.json` 的 `dataRoot`
+3. 旧布局兼容：仓库根已有 `data.db` 则继续就地使用（本机开发零迁移）
+4. 默认 `%APPDATA%\VideoForge`（打包分发形态，安装目录只读可运行）
+
+首次使用新数据目录会自动建结构、铺共享演示依赖清单并接走旧密钥/数据库（复制不移动，旧目录可回退）。共享依赖需一次性 `npm install --prefix <dataRoot>/workspaces`（启动日志会提示）。
+
 ## 2. Whisper ASR
 
 用于抖音无字幕长视频。当前启动脚本：

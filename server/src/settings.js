@@ -1,6 +1,6 @@
 import { existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ROOT } from "./config.js";
+import { DATA_ROOT } from "./config.js";
 
 /**
  * User settings that contain SECRETS (LLM / MiniMax API keys, HeyGem token).
@@ -8,7 +8,7 @@ import { ROOT } from "./config.js";
  * (which is shareable), never returned unmasked by any API. This is the
  * "BYO API key, stored locally only" layer from PRODUCT-PLAN §二.
  */
-const SETTINGS_PATH = join(ROOT, "settings.local.json");
+const SETTINGS_PATH = join(DATA_ROOT, "settings.local.json");
 
 const DEFAULTS = {
   llm: {
