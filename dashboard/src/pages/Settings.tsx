@@ -19,11 +19,49 @@ export function Settings() {
   return (
     <div>
       {msg && <div className="card error">{msg}</div>}
+      <DiagnosticsCard />
       <LlmCard s={s} onSaved={setS} />
       <SourcesCard s={s} onSaved={setS} />
       <MinimaxCard s={s} onSaved={setS} />
       <VoiceCloneCard s={s} onSaved={setS} />
       <HeygemCard s={s} onSaved={setS} />
+    </div>
+  );
+}
+
+function DiagnosticsCard() {
+  const [busy, setBusy] = useState(false);
+  const [result, setResult] = useState("");
+
+  const exportDiagnostics = async () => {
+    setBusy(true);
+    setResult("");
+    try {
+      const payload = await api.diagnostics();
+      const blob = new Blob([JSON.stringify(payload, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      const stamp = new Date().toISOString().replace(/[:.]/g, "-");
+      link.href = url;
+      link.download = `videoforge-diagnostics-${stamp}.json`;
+      link.click();
+      URL.revokeObjectURL(url);
+      setResult("已导出诊断文件（密钥已脱敏）");
+    } catch (error) {
+      setResult(`导出失败：${error instanceof Error ? error.message : "无法读取诊断信息"}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="card vf-settings-card">
+      <h3>远程排障</h3>
+      <p className="muted">导出运行环境、配置状态和最近错误，便于提交问题。不包含 API key 或访问令牌。</p>
+      <div className="vf-settings-actions">
+        <button className="primary" disabled={busy} onClick={exportDiagnostics}>{busy ? "整理中…" : "一键导出诊断"}</button>
+        {result && <span className={result.startsWith("已") ? "badge ok" : "badge err"}>{result}</span>}
+      </div>
     </div>
   );
 }

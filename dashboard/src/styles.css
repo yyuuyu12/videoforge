@@ -96,6 +96,10 @@ button { cursor: pointer; }
 .vf-opening-sparkles { stroke:#d08a38; stroke-width:2.5; animation:vf-opening-sparkle 1.8s ease-in-out infinite; }
 .vf-opening-loader strong { font:700 19px/1.4 Georgia,"Noto Sans SC",serif; }
 .vf-opening-loader > span { margin-top:5px; color:#9a866f; font-size:12px; }
+.vf-update-banner { display:flex; min-height:38px; align-items:center; justify-content:center; gap:12px; padding:7px 20px; border-bottom:1px solid rgba(138,90,51,.18); background:#fff4df; color:#68411f; font-size:12px; }
+.vf-update-banner a { color:#8a4d28; font-weight:700; }
+.vf-update-banner button { width:28px; height:28px; border:0; border-radius:50%; background:transparent; color:#806a55; font-size:19px; line-height:1; }
+.vf-update-banner button:hover { background:rgba(138,90,51,.1); }
 .vf-opening-dots { display:flex; gap:6px; margin-top:15px; }
 .vf-opening-dots i { width:5px; height:5px; border-radius:50%; background:#9a6b3f; animation:vf-opening-dot 1.2s ease-in-out infinite; }
 .vf-opening-dots i:nth-child(2) { animation-delay:.16s; }
@@ -228,3 +232,4 @@ body { color:var(--vf-ink); background:linear-gradient(135deg,#f2eadc 0%,#fffdf8
 .vf-onboarding-avatar i { width:54px; height:70px; border-radius:50% 50% 38% 38%; background:rgba(122,79,42,.24); }
 .vf-onboarding-avatar strong { font-size:12px; }
 @media(max-width:700px){.vf-onboarding{padding:16px 14px 38px}.vf-onboarding-brand{margin-bottom:24px}.vf-onboarding-steps li{gap:5px}.vf-onboarding-steps li:not(:last-child)::after{display:none}.vf-onboarding-steps span{padding-right:0;background:transparent;font-size:10px}.vf-onboarding-panel{min-height:0;padding:30px 20px 22px}.vf-onboarding-panel>h1{font-size:24px}.vf-onboarding-choices,.vf-onboarding-fields{grid-template-columns:1fr}.vf-onboarding-choices button{min-height:92px}.vf-onboarding-panel footer{align-items:stretch;flex-direction:column}.vf-onboarding-panel footer>div{width:100%;flex-wrap:wrap}.vf-onboarding-panel footer button{flex:1}.vf-onboarding-avatar{grid-template-columns:1fr;min-height:300px}.vf-onboarding-avatar aside{min-height:150px}.vf-onboarding-avatar>div{padding:24px}}
+@media(max-width:480px){.vf-update-banner{justify-content:flex-start;gap:8px;padding:7px 12px}.vf-update-banner span{min-width:0;flex:1}.vf-update-banner a{white-space:nowrap}.vf-update-banner button{flex:0 0 28px}}

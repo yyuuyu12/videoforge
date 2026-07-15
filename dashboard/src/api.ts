@@ -139,6 +139,15 @@ export interface Settings {
   };
 }
 
+export interface VersionInfo {
+  current: string;
+  latest: string | null;
+  updateAvailable: boolean;
+  releaseUrl?: string;
+  checked: boolean;
+  message?: string;
+}
+
 export interface TestResult {
   ok: boolean;
   configured?: boolean;
@@ -254,14 +263,50 @@ export interface UsageData {
   pagination: { page: number; pageSize: number; total: number; totalPages: number };
 }
 
+function friendlyError(status: number | null, detail: string, error?: unknown) {
+  const raw = detail.trim();
+  const normalized = `${raw} ${error instanceof Error ? error.name : ""}`.toLowerCase();
+  if (/[一-鿿]/.test(raw) && raw.length <= 180 && !/(econn|fetch failed|stack|http \d{3})/i.test(raw)) {
+    return raw;
+  }
+  if (normalized.includes("abort") || normalized.includes("timeout") || normalized.includes("timed out")) {
+    return "服务响应时间过长，可能仍在启动或当前繁忙。请确认相关服务已启动，稍后重试。";
+  }
+  if (normalized.includes("heygem")) {
+    return "数字人服务暂时不可用。请在设置中检查 HeyGem 地址，并确认服务已经启动。";
+  }
+  if (normalized.includes("whisper") || normalized.includes("asr")) {
+    return "语音识别服务暂时不可用。请确认 Whisper ASR 已启动，或在设置中检查服务地址。";
+  }
+  if (normalized.includes("ffmpeg") || normalized.includes("ffprobe")) {
+    return "导出组件不可用，暂时无法生成视频。请安装 ffmpeg，或使用包含导出组件的正式安装包。";
+  }
+  if (normalized.includes("econnrefused") || normalized.includes("fetch failed") || normalized.includes("networkerror") || normalized.includes("failed to fetch")) {
+    return "无法连接到服务，可能是服务尚未启动或地址配置不正确。请检查服务状态和设置后重试。";
+  }
+  if (status === 401 || status === 403 || normalized.includes("api key") || normalized.includes("apikey") || normalized.includes("quota")) {
+    return "外部服务拒绝了请求，可能是密钥无效或账户额度不足。请在设置中检查密钥和账户余额。";
+  }
+  if (status !== null && status >= 500) {
+    return "服务暂时处理失败。请稍后重试；如果反复出现，请在设置中导出诊断文件。";
+  }
+  return raw || "请求没有成功。请检查当前配置后重试；如果问题持续，请导出诊断文件。";
+}
+
 async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  const resp = await fetch(`/api${path}`, {
-    headers: { "content-type": "application/json" },
-    ...init,
-  });
+  let resp: Response;
+  try {
+    resp = await fetch(`/api${path}`, {
+      headers: { "content-type": "application/json" },
+      ...init,
+    });
+  } catch (error) {
+    throw new Error(friendlyError(null, error instanceof Error ? error.message : "", error));
+  }
   if (!resp.ok) {
     const body = await resp.json().catch(() => ({}));
-    throw new Error((body as { error?: string }).error ?? `${resp.status}`);
+    const detail = (body as { error?: string }).error ?? "";
+    throw new Error(friendlyError(resp.status, detail));
   }
   return resp.json() as Promise<T>;
 }
@@ -362,6 +407,8 @@ export const api = {
 
   // settings / providers / voice / heygem — M1
   settings: () => req<Settings>("/settings"),
+  version: () => req<VersionInfo>("/version"),
+  diagnostics: () => req<Record<string, unknown>>("/diagnostics"),
   saveSettings: (patch: unknown) =>
     req<Settings>("/settings", { method: "PUT", body: JSON.stringify(patch) }),
   testLlm: () => req<TestResult>("/settings/test-llm", { method: "POST" }),

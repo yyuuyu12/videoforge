@@ -1,7 +1,7 @@
 import { Router } from "express";
 import { copyFileSync, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, unlinkSync, writeFileSync } from "node:fs";
 import { basename, isAbsolute, join, relative, resolve } from "node:path";
-import { config } from "./config.js";
+import { config, DATA_ROOT, ROOT } from "./config.js";
 import { db, getJob, logEvent, updateJob } from "./db.js";
 import { fetchArticleText, runDiscovery } from "./workers/discovery.js";
 import { approveGate, retryJob } from "./workers/pipeline.js";
@@ -20,6 +20,65 @@ export const api = Router();
 
 api.get("/health", (_req, res) => res.json({ ok: true }));
 api.get("/meta", (_req, res) => res.json({ stages: STAGES, theme: config.theme }));
+
+const APP_VERSION = JSON.parse(readFileSync(join(ROOT, "package.json"), "utf8")).version;
+const VERSION_CACHE_MS = 15 * 60 * 1000;
+let versionCache = null;
+
+function isNewerVersion(latest, current) {
+  const parse = (value) => String(value ?? "")
+    .replace(/^v/i, "")
+    .split(".")
+    .map((part) => Number.parseInt(part, 10));
+  const next = parse(latest);
+  const installed = parse(current);
+  if (next.some(Number.isNaN) || installed.some(Number.isNaN)) return false;
+  for (let index = 0; index < Math.max(next.length, installed.length); index += 1) {
+    const difference = (next[index] ?? 0) - (installed[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return false;
+}
+
+api.get("/version", async (_req, res) => {
+  if (versionCache && Date.now() - versionCache.cachedAt < VERSION_CACHE_MS) {
+    return res.json(versionCache.payload);
+  }
+  try {
+    const response = await fetch("https://api.github.com/repos/yyuuyu12/videoforge/releases/latest", {
+      headers: {
+        accept: "application/vnd.github+json",
+        "user-agent": `VideoForge/${APP_VERSION}`,
+      },
+      signal: AbortSignal.timeout(5000),
+    });
+    if (response.status === 404) {
+      const payload = { current: APP_VERSION, latest: null, updateAvailable: false, checked: true, message: "尚未发布正式版本" };
+      versionCache = { cachedAt: Date.now(), payload };
+      return res.json(payload);
+    }
+    if (!response.ok) throw new Error(`GitHub returned ${response.status}`);
+    const release = await response.json();
+    const latest = String(release.tag_name ?? "").replace(/^v/i, "") || null;
+    const payload = {
+      current: APP_VERSION,
+      latest,
+      updateAvailable: latest ? isNewerVersion(latest, APP_VERSION) : false,
+      releaseUrl: release.html_url || undefined,
+      checked: true,
+    };
+    versionCache = { cachedAt: Date.now(), payload };
+    return res.json(payload);
+  } catch {
+    return res.json({
+      current: APP_VERSION,
+      latest: null,
+      updateAvailable: false,
+      checked: false,
+      message: "暂时无法检查更新，不影响本机使用",
+    });
+  }
+});
 
 function chapterGeneration(job) {
   const root = join(job.workspace, "presentation", "src", "chapters");
@@ -208,6 +267,47 @@ api.get("/usage", (req, res) => {
 // ---- settings（密钥只存本地 settings.local.json，GET 永远打码）---------------
 
 api.get("/settings", (_req, res) => res.json(publicSettings()));
+
+// Export a local, secret-free support bundle. Keep this endpoint synchronous so
+// it also works when a provider is unavailable and the user is already
+// troubleshooting a failed startup.
+api.get("/diagnostics", (_req, res) => {
+  const settings = publicSettings();
+  const redact = (value) => String(value ?? "")
+    .replace(/(authorization\s*:\s*bearer\s+)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/(api[_-]?key\s*[=:]\s*)[^\s,;]+/gi, "$1[REDACTED]")
+    .replace(/\b(sk-[A-Za-z0-9_-]{8,}|eyJ[A-Za-z0-9_-]{20,})\b/g, "[REDACTED]");
+  const recentEvents = db.prepare(`
+    SELECT job_id, stage, level, message, ts
+    FROM job_events
+    ORDER BY id DESC LIMIT 200
+  `).all().map((event) => ({ ...event, message: redact(event.message) }));
+  const recentJobs = db.prepare(`
+    SELECT id, title, stage, status, error, created_at, updated_at
+    FROM jobs ORDER BY id DESC LIMIT 20
+  `).all().map((job) => ({ ...job, error: redact(job.error) }));
+  const logFiles = [];
+  try {
+    for (const name of readdirSync(join(DATA_ROOT, "logs"))) {
+      const file = join(DATA_ROOT, "logs", name);
+      const stat = statSync(file);
+      if (stat.isFile()) logFiles.push({ name, bytes: stat.size, modifiedAt: stat.mtime.toISOString() });
+    }
+  } catch {}
+  res.json({
+    exportedAt: new Date().toISOString(),
+    app: "VideoForge",
+    node: process.version,
+    platform: `${process.platform}/${process.arch}`,
+    root: ROOT,
+    dataRoot: DATA_ROOT,
+    port: config.port,
+    settings,
+    recentJobs,
+    recentEvents,
+    logFiles,
+  });
+});
 
 api.put("/settings", (req, res) => {
   // Accept a partial patch; empty-string keys mean "keep existing" so the
