@@ -28,7 +28,8 @@ export const STAGES = [
   { id: "gate_audio", kind: "gate", label: "配音验收" },
   { id: "subtitle_cues", kind: "work", label: "精确字幕" },
   { id: "gate_subtitles", kind: "gate", label: "字幕验收" },
-  { id: "avatar_gen", kind: "work", label: "数字人对口型" },
+  { id: "avatar_media", kind: "work", label: "数字人生成" },
+  { id: "avatar_wire", kind: "work", label: "数字人接线" },
   { id: "gate_avatar", kind: "gate", label: "数字人验收" },
   { id: "gate_render", kind: "gate", label: "成片确认" },
   { id: "render", kind: "work", label: "成片渲染" },
@@ -89,8 +90,8 @@ function videoCodec(path) {
   });
 }
 
-function avatarProgress(jobId, percent, message) {
-  logEvent(jobId, "avatar_gen", `progress|${Math.max(0, Math.min(100, Math.round(percent)))}|${message}`);
+function avatarProgress(jobId, percent, message, stage = "avatar_media") {
+  logEvent(jobId, stage, `progress|${Math.max(0, Math.min(100, Math.round(percent)))}|${message}`);
 }
 
 function writeJson(path, value) {
@@ -178,7 +179,7 @@ async function splitAvatarPreviews(job, files, lipsync, avatarDir, presDir) {
     let duration = 0;
     for (const file of chapterFiles) duration += await mediaDuration(file);
     const output = join(chapterDir, `${chapter}.mp4`);
-    const cut = await sh("ffmpeg", ["-y", "-ss", cursor.toFixed(3), "-i", lipsync, "-t", duration.toFixed(3), "-c:v", "libx264", "-preset", "veryfast", "-an", output], presDir, job.id, "avatar_gen");
+    const cut = await sh("ffmpeg", ["-y", "-ss", cursor.toFixed(3), "-i", lipsync, "-t", duration.toFixed(3), "-c:v", "libx264", "-preset", "veryfast", "-an", output], presDir, job.id, "avatar_media");
     if (!cut.ok) return cut;
     cursor += duration;
     chapterIndex += 1;
@@ -187,7 +188,7 @@ async function splitAvatarPreviews(job, files, lipsync, avatarDir, presDir) {
   return { ok: true };
 }
 
-async function wireAvatar(job, meta, presDir) {
+async function wireAvatarWithAgent(job, meta, presDir) {
   const skill = config.skills.videoAvatarSubtitles;
   const positionKey = meta.avatar?.position || "right-third";
   const position = positionKey === "right-top" ? "右上角小窗" : positionKey === "right-bottom" ? "右下角小窗" : "右侧讲师区（较标准三分之一区域缩小 30%）";
@@ -204,8 +205,8 @@ async function wireAvatar(job, meta, presDir) {
     `- 所有新建组件的同名 CSS 必须由组件显式 import，不允许只创建 CSS 文件`,
     `- 完成后运行 npx tsc --noEmit，修复全部错误后退出。`,
   ].join("\n");
-  avatarProgress(job.id, 96, "正在把数字人接入每一页画面");
-  const wired = await runAgent({ jobId: job.id, stage: "avatar_gen", cwd: presDir, prompt });
+  avatarProgress(job.id, 96, "正在把数字人接入每一页画面（旧版脚手架 LLM 回退）", "avatar_wire");
+  const wired = await runAgent({ jobId: job.id, stage: "avatar_wire", cwd: presDir, prompt });
   const componentDir = join(presDir, "src", "components");
   if (existsSync(componentDir)) {
     for (const name of readdirSync(componentDir).filter((entry) => /^Avatar.*\.tsx$/.test(entry))) {
@@ -215,7 +216,7 @@ async function wireAvatar(job, meta, presDir) {
   }
   applySubtitlePreset(presDir, meta);
   if (!wired.ok) return wired;
-  const checked = await typecheckPresentation(presDir, job.id, "avatar_gen");
+  const checked = await typecheckPresentation(presDir, job.id, "avatar_wire");
   if (!checked.ok) return checked;
   try {
     await captureJobCover(job, { requireAvatar: true });
@@ -228,7 +229,7 @@ async function wireAvatar(job, meta, presDir) {
       avatar: { ...(meta.avatar ?? {}), pendingRegeneration: false },
     }),
   });
-  avatarProgress(job.id, 100, "数字人生成、章节预览和作品封面已完成");
+  avatarProgress(job.id, 100, "数字人生成、章节预览和作品封面已完成", "avatar_wire");
   return { ok: true, note: "数字人对口型视频已生成并接入右侧讲师区，作品封面已同步更新" };
 }
 
@@ -466,7 +467,8 @@ const runners = {
     return typecheckPresentation(presDir, job.id, "subtitle_cues");
   },
 
-  async avatar_gen(job) {
+  /** 媒体段：HeyGem 推理 + 章节预览，按输入指纹 checkpoint；不做接线。 */
+  async avatar_media(job) {
     let meta = {};
     try { meta = JSON.parse(job.meta || "{}"); } catch {}
     if (!meta.avatar?.enabled) return { ok: true, note: "本作品未启用数字人" };
@@ -500,14 +502,14 @@ const runners = {
       avatarProgress(job.id, 88, "数字人媒体已生成，跳过重复模型计算");
       const split = await splitAvatarPreviews(job, files, lipsync, avatarDir, presDir);
       if (!split.ok) return split;
-      return wireAvatar(job, meta, presDir);
+      return { ok: true, note: "数字人媒体命中 checkpoint（未重复推理），进入接线" };
     }
     const service = await heygemHealth();
     if (!service.ok || !service.ready) return { ok: false, note: "HeyGem 服务未启动或模型未就绪，请先在设置中确认数字人服务状态" };
     const concatFile = join(avatarDir, "audio-list.txt");
     writeFileSync(concatFile, files.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n"));
     const merged = join(avatarDir, "narration.mp3");
-    const merge = await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-c:a", "libmp3lame", merged], presDir, job.id, "avatar_gen");
+    const merge = await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-c:a", "libmp3lame", merged], presDir, job.id, "avatar_media");
     if (!merge.ok) return merge;
     // HeyGem 服务端用 cv2 逐帧读上传的视频，HEVC/H.265 源会让 VideoCapture.read
     // 直接抛异常（job#11 实测：推理到 28% 崩）。非 H.264 源先转码，结果缓存复用。
@@ -517,7 +519,7 @@ const runners = {
       const normalized = join(avatarDir, `presenter-${sourceFingerprint.slice(0, 16)}-h264.mp4`);
       if (!existsSync(normalized)) {
         avatarProgress(job.id, 9, `出镜视频编码为 ${codec}，正在转码为 HeyGem 兼容的 H.264`);
-        const trans = await sh("ffmpeg", ["-y", "-i", source, "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", normalized], presDir, job.id, "avatar_gen");
+        const trans = await sh("ffmpeg", ["-y", "-i", source, "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", normalized], presDir, job.id, "avatar_media");
         if (!trans.ok) return trans;
       }
       uploadPath = normalized;
@@ -543,12 +545,67 @@ const runners = {
         writeJson(markerPath, { fingerprint, sourceFingerprint, generatedAt: new Date().toISOString() });
         const split = await splitAvatarPreviews(job, files, lipsync, avatarDir, presDir);
         if (!split.ok) return split;
-        return wireAvatar(job, meta, presDir);
+        return { ok: true, note: "数字人媒体生成完成，进入接线" };
       }
       if (state.status === "error") return { ok: false, note: state.error || "数字人生成失败" };
       await new Promise((resolve) => setTimeout(resolve, 5000));
     }
     return { ok: false, note: "数字人生成超时，可直接重试本环节" };
+  },
+
+  /** 接线段：确定性写 registry 配置驱动模板组件；旧脚手架回退 LLM 接线。 */
+  async avatar_wire(job) {
+    let meta = {};
+    try { meta = JSON.parse(job.meta || "{}"); } catch {}
+    const presDir = join(job.workspace, "presentation");
+    if (!meta.avatar?.enabled) {
+      applySubtitlePreset(presDir, jobOptions(job));
+      return { ok: true, note: "本作品未启用数字人，跳过接线" };
+    }
+    const appPath = join(presDir, "src", "App.tsx");
+    const hasContract = existsSync(appPath) && readFileSync(appPath, "utf8").includes("avatar-mount:v1");
+    if (!hasContract) {
+      logEvent(job.id, "avatar_wire", "旧版脚手架（无 avatar-mount:v1 契约），回退 LLM 接线");
+      return wireAvatarWithAgent(job, meta, presDir);
+    }
+    avatarProgress(job.id, 30, "按确定性契约写入数字人配置", "avatar_wire");
+    const positionKey = meta.avatar?.position || "right-third";
+    // 尺寸定稿依据 PROJECT-MEMORY：右侧讲师区 = 标准 360×640 竖窗缩小 30%
+    // → 252×448，正文预留 448px；角落小窗预留 360px。
+    const sizes = positionKey === "right-third"
+      ? { reservePx: 448, windowWidthPx: 252, windowHeightPx: 448 }
+      : { reservePx: 360, windowWidthPx: 252, windowHeightPx: 448 };
+    const avatarConfig = { enabled: true, position: positionKey, ...sizes };
+    writeFileSync(join(presDir, "src", "registry", "avatarConfig.ts"), [
+      "// AUTO-GENERATED by VideoForge avatar_wire — do not hand-edit.",
+      'export type AvatarPosition = "right-third" | "right-top" | "right-bottom";',
+      "",
+      "export interface AvatarConfig {",
+      "  enabled: boolean;",
+      "  position: AvatarPosition;",
+      "  reservePx: number;",
+      "  windowWidthPx: number;",
+      "  windowHeightPx: number;",
+      "}",
+      "",
+      `export const AVATAR_CONFIG: AvatarConfig = ${JSON.stringify(avatarConfig, null, 2)};`,
+      "",
+    ].join("\n"));
+    applySubtitlePreset(presDir, jobOptions(job));
+    avatarProgress(job.id, 60, "TypeScript 检查", "avatar_wire");
+    const checked = await typecheckPresentation(presDir, job.id, "avatar_wire");
+    if (!checked.ok) return checked;
+    avatarProgress(job.id, 85, "更新作品封面", "avatar_wire");
+    try {
+      await captureJobCover(job, { requireAvatar: true });
+    } catch (error) {
+      logEvent(job.id, "cover", `数字人已接线，但封面更新失败：${error.message}`, "warning");
+    }
+    updateJob(job.id, {
+      meta: JSON.stringify({ ...meta, avatar: { ...(meta.avatar ?? {}), pendingRegeneration: false } }),
+    });
+    avatarProgress(job.id, 100, "数字人接线完成（registry 数据驱动，无 LLM 参与）", "avatar_wire");
+    return { ok: true, note: "数字人已按确定性契约接入右侧讲师区" };
   },
 
   /** 服务端一键成片（无头浏览器 + ffmpeg）；失败时给出手动录制兜底方法。 */

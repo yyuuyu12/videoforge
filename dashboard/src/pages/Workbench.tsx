@@ -65,7 +65,8 @@ const stageProgress: Record<string, string> = {
   chapter_gen: "正在逐页生成并检查画面",
   audio_synth: "正在生成配音和逐字时间轴",
   subtitle_cues: "正在生成并校验字幕",
-  avatar_gen: "正在调用数字人模型并进行口型同步",
+  avatar_media: "正在调用数字人模型并进行口型同步",
+  avatar_wire: "正在把数字人接入每一页画面",
   render: "正在准备成片",
 };
 
@@ -88,7 +89,7 @@ const retryImpacts: Record<string, RetryImpact> = {
   gate_audio: { label: "配音验收", redo: "重新试听或修改配音", keep: "保留 PPT 和已生成配音", next: "确认后生成字幕" },
   subtitle_cues: { label: "字幕", redo: "重新生成并检查字幕时间轴", keep: "保留 PPT 和配音", next: "重新预览字幕" },
   gate_subtitles: { label: "字幕验收", redo: "重新检查或调整字幕", keep: "保留 PPT、配音和当前字幕", next: "确认后进入数字人" },
-  avatar_gen: { label: "数字人", redo: "重新生成口型并接入现有 PPT", keep: "保留原文、稿件、PPT、配音和字幕", next: "重新逐章预览数字人" },
+  avatar_media: { label: "数字人", redo: "重新生成口型并接入现有 PPT", keep: "保留原文、稿件、PPT、配音和字幕", next: "重新逐章预览数字人" },
   gate_avatar: { label: "数字人验收", redo: "重新检查或更换数字人；更换后只重做口型与接线", keep: "保留数字人之前的全部内容", next: "确认后进入导出" },
   gate_render: { label: "导出确认", redo: "重新检查完整预览", keep: "保留 PPT、配音、字幕和数字人", next: "确认后生成 MP4" },
   render: { label: "成片导出", redo: "重新录制画面并混合声音，覆盖旧 MP4", keep: "保留 PPT、配音、字幕和数字人，不重新生成素材", next: "完成后可下载新成片" },
@@ -111,7 +112,7 @@ function phaseIndex(job: JobDetail) {
   if (["gate_style", "scaffold"].includes(job.stage)) return 2;
   if (["chapter_gen", "gate_chapters"].includes(job.stage)) return 3;
   if (["audio_synth", "gate_audio", "subtitle_cues", "gate_subtitles"].includes(job.stage)) return 4;
-  if (["avatar_gen", "gate_avatar"].includes(job.stage)) return 5;
+  if (["avatar_media", "avatar_wire", "gate_avatar"].includes(job.stage)) return 5;
   return 6;
 }
 
@@ -198,7 +199,7 @@ export function Workbench({
       .catch(() => {});
   }, [jobId, job?.stage, job?.status]);
   useEffect(() => {
-    if (!job || !["gate_chapters", "audio_synth", "gate_audio", "subtitle_cues", "gate_subtitles", "avatar_gen", "gate_avatar", "gate_render", "render", "done"].includes(job.stage)) return;
+    if (!job || !["gate_chapters", "audio_synth", "gate_audio", "subtitle_cues", "gate_subtitles", "avatar_media", "avatar_wire", "gate_avatar", "gate_render", "render", "done"].includes(job.stage)) return;
     const loadAudit = () => api.audit(jobId).then(setAudit).catch(() => {});
     void loadAudit();
     const timer = window.setInterval(loadAudit, 5000);
@@ -814,11 +815,11 @@ export function Workbench({
         <>
           <p className="vf-kicker">数字人</p>
           <h2>
-            {job.stage === "avatar_gen" && job.status === "running"
+            {["avatar_media", "avatar_wire"].includes(job.stage) && job.status === "running"
               ? "正在生成数字人"
               : "选择你的出镜形象"}
           </h2>
-          {job.stage === "avatar_gen" &&
+          {["avatar_media", "avatar_wire"].includes(job.stage) &&
             ["queued", "running"].includes(job.status) && (
               <div className="vf-avatar-progress">
                 <div>
@@ -831,7 +832,7 @@ export function Workbench({
             )}
           {(() => {
             const avatarNeedsRegeneration = Boolean(meta.avatar?.pendingRegeneration)
-              || (job.stage === "avatar_gen" && job.status === "failed");
+              || (["avatar_media", "avatar_wire"].includes(job.stage) && job.status === "failed");
             return <>
           {avatarNeedsRegeneration && (
             <div className="vf-regenerate vf-avatar-recovery" role="status">
@@ -920,7 +921,7 @@ export function Workbench({
             {meta.avatar?.filename && (
               <button
                 className="vf-primary"
-                disabled={busy || (job.stage === "avatar_gen" && ["queued", "running"].includes(job.status))}
+                disabled={busy || (["avatar_media", "avatar_wire"].includes(job.stage) && ["queued", "running"].includes(job.status))}
                 onClick={() => void generateAvatar()}
               >
                 {avatarNeedsRegeneration ? "仅重新生成数字人口型" : "生成数字人口型"}

@@ -113,6 +113,9 @@ if (!extractionColumns.includes("job_id")) db.exec("ALTER TABLE douyin_extractio
 const jobColumns = db.prepare("PRAGMA table_info(jobs)").all().map((column) => column.name);
 if (!jobColumns.includes("error")) db.exec("ALTER TABLE jobs ADD COLUMN error TEXT");
 
+// 2026-07-15：avatar_gen 拆分为 avatar_media + avatar_wire——在途作品平移到媒体段
+db.exec("UPDATE jobs SET stage = 'avatar_media' WHERE stage = 'avatar_gen'");
+
 const feedbackColumns = db.prepare("PRAGMA table_info(feedback)").all().map((column) => column.name);
 if (!feedbackColumns.includes("progress")) db.exec("ALTER TABLE feedback ADD COLUMN progress INTEGER NOT NULL DEFAULT 0");
 if (!feedbackColumns.includes("progress_message")) db.exec("ALTER TABLE feedback ADD COLUMN progress_message TEXT");

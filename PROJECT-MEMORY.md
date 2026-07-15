@@ -25,6 +25,12 @@
 
 该文件保存长期有效的工程决策，不保存密钥、个人素材或临时任务状态。
 
+## 2026-07-15 B1/B2 落地
+
+- 数据目录分离（B2）：DATA_ROOT 解析 = env VIDEOFORGE_DATA_DIR > config.dataRoot > 旧布局就地 > %APPDATA%VideoForge；冷启动自动供给结构并接走旧密钥/数据库（复制不移动）。
+- 数字人拆分（B1）：avatar_media（HeyGem 推理+章节预览，输入指纹 checkpoint，重试不重推理）+ avatar_wire（确定性接线：只写 src/registry/avatarConfig.ts，模板组件数据驱动）。新 scaffold 含 avatar-mount:v1 契约与 Subtitle/AvatarPresenter 模板组件（Subtitle 取自 job-14 审计通过版）；无契约的旧作品自动回退 LLM 接线。在途作品 stage 由 db 迁移平移到 avatar_media。
+- 讲师区尺寸定稿沿用：右侧竖窗 252×448、正文预留 448px（角落小窗预留 360px）。
+
 ## 产品原则
 
 - 以用户提供的 standalone HTML 为视觉与结构基准，工作台必须保留轻量编辑部质感。

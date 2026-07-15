@@ -123,7 +123,7 @@ v1 是录屏指引（最可靠）。v2 上服务端自动成片：Playwright 无
 
 ### 第一梯队：产品先站稳（打包前）
 
-#### B1. 数字人阶段拆分与确定性接线（P0，当前最高优先级）
+#### B1. 数字人阶段拆分与确定性接线（✅ 2026-07-15 已实施：avatar_media/avatar_wire + registry 契约；旧作品 LLM 回退）
 
 - 将 `avatar_gen` 拆为 `avatar_media` 与 `avatar_wire`：
   - `avatar_media`：HeyGem 推理、按产物哈希 checkpoint、失败重试不重复推理；
@@ -131,7 +131,7 @@ v1 是录屏指引（最可靠）。v2 上服务端自动成片：Playwright 无
 - `Subtitle`、`AvatarPresenter` 组件及 CSS 改为仓库内确定性模板，禁止让 LLM 临时生成这类基础接线代码。
 - 验收：同一输入可重复得到相同阶段产物；接线失败可单独重试；缺失 CSS/import 不再破坏布局；一次失败不会重新跑 HeyGem 推理。
 
-#### B2. 数据目录与代码分离
+#### B2. 数据目录与代码分离（✅ 2026-07-15 已实施：dataRoot 四级解析 + 冷启动供给）
 
 - 将 `data.db`、`workspaces/`、`settings.local.json` 等运行时数据迁移到 `%APPDATA%\\VideoForge\\`。
 - 所有运行时路径统一从 `dataRoot` 配置解析，仓库/安装目录只读代码和静态资源。

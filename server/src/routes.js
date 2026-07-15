@@ -112,7 +112,7 @@ function usageCategory(service, operation = "") {
   if (/chapter_gen|visual-refine/.test(operation)) return "visual";
   if (/script_outline|text-refine|completion/.test(operation)) return "text";
   if (/audio_synth|audio-refine/.test(operation)) return "audio";
-  if (/avatar_gen|avatar-refine/.test(operation)) return "avatar";
+  if (/avatar_gen|avatar_media|avatar_wire|avatar-refine/.test(operation)) return "avatar";
   if (/subtitle_cues/.test(operation)) return "visual";
   return "other";
 }
@@ -328,7 +328,7 @@ api.post("/jobs/:id/avatar/select", (req, res) => {
     pendingRegeneration: true,
   };
   updateJob(job.id, { meta: JSON.stringify(meta) });
-  logEvent(job.id, "avatar_gen", `已切换数字人素材：${asset.name}；等待重新生成口型`);
+  logEvent(job.id, "avatar_media", `已切换数字人素材：${asset.name}；等待重新生成口型`);
   res.json({ ok: true, asset: { id: asset.id, name: asset.name }, pendingRegeneration: true });
 });
 
@@ -639,11 +639,11 @@ api.post("/jobs/:id/avatar/generate", async (req, res) => {
   }
   const service = await heygemHealth();
   if (!service.ok || !service.ready) {
-    logEvent(job.id, "avatar_gen", "HeyGem 未就绪，未提交口型生成", "error");
+    logEvent(job.id, "avatar_media", "HeyGem 未就绪，未提交口型生成", "error");
     return res.status(409).json({ error: "HeyGem 当前未启动或还在加载模型。请启动服务并确认状态变为“可用”后，再重新生成。" });
   }
-  updateJob(job.id, { stage: "avatar_gen", status: "queued", error: null });
-  logEvent(job.id, "avatar_gen", "已提交数字人对口型任务");
+  updateJob(job.id, { stage: "avatar_media", status: "queued", error: null });
+  logEvent(job.id, "avatar_media", "已提交数字人对口型任务");
   res.status(202).json({ ok: true, accepted: true });
 });
 

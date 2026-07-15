@@ -25,7 +25,7 @@ npm run server / npm run dashboard          # 开发：API :5401 + Vite :5400
 
 ## 流水线与数据
 
-阶段：`gate_source → script_outline → gate_script → gate_style → scaffold → chapter_gen → gate_chapters → audio_synth → gate_audio → subtitle_cues → gate_subtitles → avatar_gen → gate_avatar → gate_render → render → done`。原文、稿件、风格、逐章画面、配音、字幕、数字人与导出前均需人工确认；重启后 `running` 任务自动回队列。
+阶段：`gate_source → script_outline → gate_script → gate_style → scaffold → chapter_gen → gate_chapters → audio_synth → gate_audio → subtitle_cues → gate_subtitles → avatar_media → avatar_wire → gate_avatar → gate_render → render → done`。原文、稿件、风格、逐章画面、配音、字幕、数字人与导出前均需人工确认；重启后 `running` 任务自动回队列。
 
 SQLite（`data.db`）：`articles` / `jobs` / `job_events` / `feedback` / `douyin_extractions`。文件真相源在 `workspaces/job-N/`（article.md、script.md、outline.md、presentation/）。
 
