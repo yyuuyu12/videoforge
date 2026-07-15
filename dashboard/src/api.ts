@@ -140,6 +140,7 @@ export interface Settings {
 
 export interface TestResult {
   ok: boolean;
+  configured?: boolean;
   error?: string;
   detail?: unknown;
   mode?: string;
@@ -365,6 +366,7 @@ export const api = {
   testLlm: () => req<TestResult>("/settings/test-llm", { method: "POST" }),
   testMinimax: () =>
     req<TestResult>("/settings/test-minimax", { method: "POST" }),
+  asrHealth: () => req<TestResult>("/asr/health"),
   voicePreview: (payload: {
     text?: string;
     speed?: number;

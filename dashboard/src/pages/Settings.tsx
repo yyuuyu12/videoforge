@@ -153,6 +153,7 @@ function SourcesCard({ s, onSaved }: { s: SettingsData; onSaved: (s: SettingsDat
   const [tikhubKey, setTikhubKey] = useState("");
   const [asrUrl, setAsrUrl] = useState(s.asr.baseUrl);
   const [busy, setBusy] = useState(false);
+  const [test, setTest] = useState<TestResult | null>(null);
 
   return (
     <div className="card">
@@ -193,6 +194,23 @@ function SourcesCard({ s, onSaved }: { s: SettingsData; onSaved: (s: SettingsDat
         >
           保存
         </button>
+        <button
+          disabled={busy || !asrUrl.trim()}
+          onClick={async () => {
+            setBusy(true);
+            try {
+              if (asrUrl.trim() !== s.asr.baseUrl) {
+                onSaved(await api.saveSettings({ asr: { baseUrl: asrUrl } }));
+              }
+              setTest(await api.asrHealth().catch((e) => ({ ok: false, error: String(e.message) })));
+            } finally {
+              setBusy(false);
+            }
+          }}
+        >
+          {busy ? "检查中…" : "检查语音识别"}
+        </button>
+        <TestBadge r={test} />
       </div>
     </div>
   );

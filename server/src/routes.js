@@ -8,7 +8,7 @@ import { approveGate, retryJob } from "./workers/pipeline.js";
 import { runFeedback, STAGES } from "./stages.js";
 import { previewStatus, startPreview, stopPreview } from "./preview.js";
 import { renderJob } from "./render.js";
-import { publicSettings, saveSettings } from "./settings.js";
+import { loadSettings, publicSettings, saveSettings } from "./settings.js";
 import { testLlmConnection } from "./providers.js";
 import { cloneVoice, synthesize, testKey } from "./minimax.js";
 import { health as heygemHealth } from "./heygem.js";
@@ -231,6 +231,29 @@ api.post("/settings/test-minimax", async (_req, res) => {
     res.json(await testKey());
   } catch (err) {
     res.json({ ok: false, error: err.message });
+  }
+});
+
+api.get("/asr/health", async (_req, res) => {
+  const baseUrl = loadSettings().asr.baseUrl.trim().replace(/\/$/, "");
+  if (!baseUrl) {
+    return res.json({ ok: false, configured: false, error: "尚未配置语音识别服务地址" });
+  }
+
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 5000);
+  try {
+    const response = await fetch(`${baseUrl}/health`, { signal: controller.signal });
+    if (!response.ok) {
+      return res.json({ ok: false, configured: true, error: `服务返回 HTTP ${response.status}` });
+    }
+    const detail = await response.json().catch(() => null);
+    return res.json({ ok: true, configured: true, detail: detail?.status ?? detail?.message ?? "服务在线" });
+  } catch (error) {
+    const reason = error.name === "AbortError" ? "连接超时" : "无法连接";
+    return res.json({ ok: false, configured: true, error: `${reason}，请确认服务已启动且地址正确` });
+  } finally {
+    clearTimeout(timeout);
   }
 });
 

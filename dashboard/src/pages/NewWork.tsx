@@ -6,6 +6,10 @@ export function NewWork({ onCreated }: { onCreated: (id: number) => void }) {
   const [settings, setSettings] = useState<Settings | null>(null);
   useEffect(() => { api.settings().then(setSettings).catch(() => {}); }, []);
   const tikhubReady = settings ? settings.tikhub.apiKeyState.set : true;
+  const hasTranscriptionFallback = Boolean(
+    settings?.asr.baseUrl ||
+    (settings?.llm.mode === "api" && settings.llm.provider === "openai-compatible" && settings.llm.apiKeyState.set),
+  );
   const [title, setTitle] = useState("");
   const [content, setContent] = useState("");
   const [url, setUrl] = useState("");
@@ -118,11 +122,19 @@ export function NewWork({ onCreated }: { onCreated: (id: number) => void }) {
           </label>
         )}
         {extractState && <p className="vf-upload-state">{extractState}</p>}
+        {mode === "douyin" && settings && !hasTranscriptionFallback && (
+          <div className="vf-source-warning" role="status">
+            <b>无字幕视频可能无法提取完整文案</b>
+            <span>当前没有可用的语音识别服务。有内置字幕的作品仍可正常提取；需要识别原声时，请先到“设置”填写 ASR 服务地址。</span>
+          </div>
+        )}
         {error && <p className="vf-form-error">{error}</p>}
         <div className="vf-form-footer">
           <p>
             {mode === "douyin"
-              ? "优先读取作品内文案；没有字幕时自动下载原声并进行语音转文字。"
+              ? hasTranscriptionFallback
+                ? "优先读取作品内文案；没有字幕时自动下载原声并进行语音转文字。"
+                : "优先读取作品内文案；当前只能处理带有完整字幕的作品。"
               : "创建后先进入原文确认，不会立即调用模型。确认内容无误后，再进入口播稿生成。"}
           </p>
           <button className="vf-primary" disabled={busy} onClick={submit}>
