@@ -13,9 +13,9 @@
 
 const SENTENCE_END = /[。！？.!?…]/;
 const SOFT_BREAK = /[，、；,;]/;
-const TARGET_CHARS = 10;
-const HARD_MAX_CHARS = 14;
-const ABSOLUTE_MAX_CHARS = 22;
+const TARGET_CHARS = 8;
+const HARD_MAX_CHARS = 10;
+const ABSOLUTE_MAX_CHARS = 10;
 // Runs of these characters are kept atomic (never split mid-run): Latin
 // letters, digits, and the punctuation that shows up inside file/code
 // tokens (`.`, `/`, `_`, `-`). This is what keeps `SKILL.md`,

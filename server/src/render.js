@@ -47,6 +47,119 @@ function walkMp3(dir) {
   });
 }
 
+async function inspectVisualQuality(page) {
+  return page.evaluate(() => {
+    const visible = (el) => {
+      const r = el.getBoundingClientRect();
+      const s = getComputedStyle(el);
+      return r.width > 2 && r.height > 2 && s.visibility !== "hidden" && s.display !== "none" && s.opacity !== "0" && !el.closest("[data-no-advance]");
+    };
+    const boxes = [...document.querySelectorAll("body *")]
+      .filter(visible)
+      .filter((el) => el.children.length === 0 || /subtitle|caption|title|headline|text/i.test(el.className || ""))
+      .map((el) => ({
+        el,
+        tag: el.tagName,
+        cls: String(el.className || ""),
+        text: (el.textContent || "").trim().slice(0, 80),
+        r: (() => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })(),
+      }));
+    const overlap = (a, b) => {
+      const x = Math.max(0, Math.min(a.r.x + a.r.w, b.r.x + b.r.w) - Math.max(a.r.x, b.r.x));
+      const y = Math.max(0, Math.min(a.r.y + a.r.h, b.r.y + b.r.h) - Math.max(a.r.y, b.r.y));
+      return x * y;
+    };
+    let collisions = 0;
+    for (let i = 0; i < boxes.length; i += 1) for (let j = i + 1; j < boxes.length; j += 1) {
+      // Parent containers and their text descendants occupy the same pixels by
+      // design; counting those pairs makes otherwise valid slides fail audit.
+      if (boxes[i].el.contains(boxes[j].el) || boxes[j].el.contains(boxes[i].el)) continue;
+      // Lines, chart nodes and decorative blocks intentionally intersect in
+      // diagrams. Only treat an intersection as a readability collision when
+      // both sides contain visible text; structural overflow is audited below.
+      if (!boxes[i].text || !boxes[j].text) continue;
+      const area = overlap(boxes[i], boxes[j]);
+      if (area > 80 && area / Math.min(boxes[i].r.w * boxes[i].r.h, boxes[j].r.w * boxes[j].r.h) > 0.15) collisions += 1;
+    }
+    const subtitle = boxes.filter((b) => /subtitle|caption/i.test(b.cls));
+    const subtitleSafe = subtitle.every((b) => b.r.y >= 0 && b.r.y + b.r.h <= innerHeight - 20);
+    const subtitleEl = document.querySelector(".subtitle");
+    const subtitleText = (subtitleEl?.textContent || "").replace(/\s+/g, "").trim();
+    const subtitleStyle = subtitleEl ? getComputedStyle(subtitleEl) : null;
+    const subtitleRect = subtitleEl?.getBoundingClientRect();
+    const subtitleLineHeight = subtitleStyle ? Number.parseFloat(subtitleStyle.lineHeight) : 0;
+    const subtitleLines = subtitleRect && subtitleLineHeight > 0 ? Math.ceil(subtitleRect.height / subtitleLineHeight) : 0;
+    const subtitleTooLong = subtitleText.length > 10;
+    const subtitleMultiline = subtitleLines > 1;
+    const contentLeaves = boxes.filter((b) => b.text && !/subtitle|caption/i.test(b.cls));
+    const longestContentText = contentLeaves.reduce((max, b) => Math.max(max, b.text.replace(/\s+/g, "").length), 0);
+    const longContentBlocks = contentLeaves.filter((b) => b.text.replace(/\s+/g, "").length > 28).length;
+    const headingViolations = boxes.filter((b) => {
+      if (!b.text || (!/^H[1-3]$/.test(b.tag) && !/headline|hero-title|main-title/i.test(b.cls))) return false;
+      const style = getComputedStyle(b.el);
+      const lineHeight = Number.parseFloat(style.lineHeight);
+      const lines = lineHeight > 0 ? Math.ceil(b.r.h / lineHeight) : 1;
+      return lines > 2;
+    }).map((b) => ({ text: b.text, lines: Math.ceil(b.r.h / Number.parseFloat(getComputedStyle(b.el).lineHeight)) }));
+    const score = Math.max(0, Math.min(100,
+      100
+      - collisions * 12
+      - (subtitleSafe ? 0 : 25)
+      - (subtitleTooLong ? 25 : 0)
+      - (subtitleMultiline ? 25 : 0)
+      - longContentBlocks * 10
+      - headingViolations.length * 20
+    ));
+    return {
+      score, collisions, subtitleSafe, subtitleTextLength: subtitleText.length,
+      subtitleLines, subtitleTooLong, subtitleMultiline, longestContentText,
+      longContentBlocks, headingViolations, sampledElements: boxes.length,
+    };
+  });
+}
+
+async function readPreviewCursor(page) {
+  return page.evaluate(() => {
+    const chapters = [...document.querySelectorAll(".pb-chapter")];
+    const chapter = chapters.findIndex((node) => node.classList.contains("pb-active"));
+    const active = chapter >= 0 ? chapters[chapter] : null;
+    const step = active ? active.querySelectorAll(".pb-pip-on").length - 1 : -1;
+    const steps = active ? active.querySelectorAll(".pb-pip").length : 0;
+    return { chapter, step, chapters: chapters.length, steps };
+  });
+}
+
+async function inspectCurrentPreviewStep(page) {
+  const audit = await page.evaluate(() => {
+    const vw = window.innerWidth;
+    const vh = window.innerHeight;
+    const offenders = [];
+    for (const node of Array.from(document.querySelectorAll("body *"))) {
+      if (!(node instanceof HTMLElement) || node.offsetParent === null || node.closest("[data-no-advance]")) continue;
+      const r = node.getBoundingClientRect();
+      if (r.width < 2 || r.height < 2) continue;
+      const overflow = r.left < -2 || r.top < -2 || r.right > vw + 2 || r.bottom > vh + 2;
+      if (overflow) offenders.push({ selector: node.className ? `.${String(node.className).split(/\\s+/)[0]}` : node.tagName.toLowerCase(), rect: { left: Math.round(r.left), top: Math.round(r.top), right: Math.round(r.right), bottom: Math.round(r.bottom) } });
+    }
+    const subtitle = document.querySelector(".subtitle");
+    const sr = subtitle?.getBoundingClientRect();
+    const subtitleInFrame = !sr || (sr.left >= -2 && sr.right <= vw + 2 && sr.top >= -2 && sr.bottom <= vh + 2);
+    const avatar = document.querySelector(".avatar-presenter");
+    const ar = avatar?.getBoundingClientRect();
+    const avatarInFrame = !ar || (ar.left >= -2 && ar.right <= vw + 2 && ar.top >= -2 && ar.bottom <= vh + 2);
+    const textNodes = Array.from(document.querySelectorAll("h1,h2,h3,p,span,li"));
+    const emptyText = textNodes.filter((el) => {
+      const r = el.getBoundingClientRect();
+      return r.width > 8 && r.height > 8 && !el.textContent?.trim();
+    }).length;
+    return { offenders: offenders.slice(0, 20), overflowCount: offenders.length, subtitleInFrame, avatarInFrame, emptyText };
+  });
+  const visual = await inspectVisualQuality(page);
+  const structuralPenalty = audit.overflowCount * 8 + (audit.subtitleInFrame ? 0 : 15) + (audit.avatarInFrame ? 0 : 10) + Math.min(5, audit.emptyText) + (visual.subtitleSafe ? 0 : 25);
+  const score = Math.max(0, Math.min(visual.score, 100 - structuralPenalty));
+  return { score, pass: score >= 90, ...audit, visual };
+}
+
 async function launchBrowser() {
   const errors = [];
   for (const channel of ["chrome", "msedge"]) {
@@ -93,6 +206,55 @@ export async function captureJobCover(job, { requireAvatar = false } = {}) {
     await page.screenshot({ path: cover, type: "png" });
     logEvent(job.id, "cover", requireAvatar ? "作品封面已更新为数字人合成预览" : "作品封面已按最新预览更新");
     return cover;
+  } finally {
+    await browser.close().catch(() => {});
+  }
+}
+
+/**
+ * Audit the rendered presentation at the canonical export viewport. This is
+ * intentionally DOM-based so failures identify the offending element instead
+ * of relying on brittle pixel thresholds.
+ */
+export async function auditPreviewQuality(job) {
+  const presDir = join(job.workspace, "presentation");
+  if (!existsSync(join(presDir, "package.json"))) throw new Error("presentation has not been generated");
+  const previewUrl = await preparePreview(job);
+  const browser = await launchBrowser();
+  try {
+    const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+    await page.goto(`${previewUrl}?chapter=0`, { waitUntil: "networkidle", timeout: 60000 });
+    await page.evaluate(() => document.fonts.ready);
+    await page.waitForTimeout(350);
+    const outDir = join(presDir, "public");
+    mkdirSync(outDir, { recursive: true });
+    const shotsDir = join(outDir, "quality-audit");
+    rmSync(shotsDir, { recursive: true, force: true });
+    mkdirSync(shotsDir, { recursive: true });
+    const steps = [];
+    for (let index = 0; index < 250; index += 1) {
+      const cursor = await readPreviewCursor(page);
+      if (cursor.chapter < 0 || cursor.step < 0) throw new Error("preview progress controls are unavailable");
+      const audit = await inspectCurrentPreviewStep(page);
+      const screenshot = `${String(index + 1).padStart(3, "0")}-c${cursor.chapter + 1}-s${cursor.step + 1}.png`;
+      await page.screenshot({ path: join(shotsDir, screenshot), type: "png" });
+      steps.push({ index, ...cursor, ...audit, screenshot });
+      await page.keyboard.press("ArrowRight");
+      await page.waitForTimeout(120);
+      const next = await readPreviewCursor(page);
+      if (next.chapter === cursor.chapter && next.step === cursor.step) break;
+    }
+    const worst = steps.reduce((lowest, item) => item.score < lowest.score ? item : lowest, steps[0]);
+    const score = worst?.score ?? 0;
+    const result = {
+      score, pass: steps.length > 0 && steps.every((step) => step.pass),
+      viewport: { width: 1920, height: 1080 }, checkedSteps: steps.length,
+      worstStep: worst, steps, checkedAt: new Date().toISOString(),
+    };
+    if (worst) writeFileSync(join(outDir, "quality-audit-worst.txt"), `${worst.screenshot}\n`);
+    writeFileSync(join(outDir, "quality-audit.json"), `${JSON.stringify(result, null, 2)}\n`);
+    logEvent(job.id, "quality", `preview quality ${result.score}/100${result.pass ? " (pass)" : " (issues found)"}`, result.pass ? "info" : "error");
+    return result;
   } finally {
     await browser.close().catch(() => {});
   }
@@ -202,6 +364,7 @@ export async function renderJob(job) {
 
     await cdp.send("Page.stopScreencast").catch(() => {});
     const audioEvents = await page.evaluate(() => window.__vfAudio);
+    const visualQuality = await inspectVisualQuality(page).catch(() => ({ score: null, collisions: null, subtitleSafe: null, sampledElements: 0 }));
     writeFileSync(join(tmpDir, "events.json"), JSON.stringify(audioEvents, null, 2));
     await browser.close();
 
@@ -267,7 +430,11 @@ export async function renderJob(job) {
       segmentsPlaced: placements.length,
       segmentsExpected: segments.length,
       durationSec: Math.round(finalDur * 10) / 10,
+      visualQuality,
     }, null, 2));
+    if (visualQuality.score !== null) {
+      logEvent(job.id, "render", `视觉质量评分 ${visualQuality.score}/100 · 重叠 ${visualQuality.collisions} · 字幕安全区 ${visualQuality.subtitleSafe ? "通过" : "需复核"}`, visualQuality.score < 75 ? "warning" : "info");
+    }
     rmSync(tmpDir, { recursive: true, force: true });
     progress(job.id, 100, `成片完成：${Math.round(finalDur)} 秒`);
     return { ok: true, note: `成片已生成 output.mp4（${Math.round(finalDur)} 秒，${placements.length}/${segments.length} 段配音，${frames.length} 帧）` };

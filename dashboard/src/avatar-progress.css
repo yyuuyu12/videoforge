@@ -2,10 +2,10 @@
 .vf-avatar-progress > div { display:flex; align-items:center; justify-content:space-between; gap:18px; margin-bottom:11px; }
 .vf-avatar-progress b { color:#4a3220; font-size:13px; line-height:1.5; }
 .vf-avatar-progress strong { flex:0 0 auto; color:#7a4f2a; font:700 18px Georgia,"Noto Sans SC",serif; }
-.vf-avatar-progress progress { display:block; width:100%; height:9px; overflow:hidden; border:0; border-radius:99px; background:rgba(138,90,51,.13); appearance:none; }
-.vf-avatar-progress progress::-webkit-progress-bar { border-radius:99px; background:rgba(138,90,51,.13); }
-.vf-avatar-progress progress::-webkit-progress-value { border-radius:99px; background:#2e7d4f; transition:width .35s ease; }
-.vf-avatar-progress progress::-moz-progress-bar { border-radius:99px; background:#2e7d4f; }
+.vf-avatar-progress progress { display:block; width:100%; height:4px; overflow:hidden; border:0; border-radius:99px; background:rgba(46,125,79,.055); appearance:none; }
+.vf-avatar-progress progress::-webkit-progress-bar { border-radius:99px; background:rgba(46,125,79,.055); }
+.vf-avatar-progress progress::-webkit-progress-value { border-radius:99px; background:rgba(46,125,79,.32); transition:width .35s ease; }
+.vf-avatar-progress progress::-moz-progress-bar { border-radius:99px; background:rgba(46,125,79,.32); }
 .vf-avatar-progress > span { display:block; margin-top:9px; color:#8c7a66; font-size:11px; }
 .vf-chapter-previews { margin-top:28px; padding-top:24px; border-top:1px solid rgba(138,90,51,.14); }
 .vf-chapter-previews h3 { margin:0 0 6px; color:#3b2d1f; font:700 18px Georgia,"Noto Sans SC",serif; }

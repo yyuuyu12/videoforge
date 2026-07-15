@@ -122,6 +122,8 @@ if (!feedbackColumns.includes("progress_message")) db.exec("ALTER TABLE feedback
 if (!feedbackColumns.includes("error")) db.exec("ALTER TABLE feedback ADD COLUMN error TEXT");
 if (!feedbackColumns.includes("result")) db.exec("ALTER TABLE feedback ADD COLUMN result TEXT");
 if (!feedbackColumns.includes("phase")) db.exec("ALTER TABLE feedback ADD COLUMN phase TEXT");
+if (!feedbackColumns.includes("attachment_path")) db.exec("ALTER TABLE feedback ADD COLUMN attachment_path TEXT");
+if (!feedbackColumns.includes("attachment_mime")) db.exec("ALTER TABLE feedback ADD COLUMN attachment_mime TEXT");
 
 // ---- tiny helpers ---------------------------------------------------------
 

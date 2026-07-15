@@ -56,6 +56,7 @@ export interface Feedback {
   error: string | null;
   result: string | null;
   created_at: string;
+  attachment_url?: string | null;
 }
 
 export interface ChapterReview {
@@ -359,10 +360,11 @@ export const api = {
     chapter: string | null,
     message: string,
     phase?: string,
+    attachment?: { name: string; mime: string; dataBase64: string },
   ) =>
     req<{ feedbackId: number }>(`/jobs/${id}/feedback`, {
       method: "POST",
-      body: JSON.stringify({ chapter, message, phase }),
+      body: JSON.stringify({ chapter, message, phase, attachment }),
     }),
   jobFile: (id: number, name: string) =>
     req<{ ok: boolean; name: string; content: string | null }>(

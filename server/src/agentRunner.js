@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { join } from "node:path";
+import { extname, join } from "node:path";
 import { config } from "./config.js";
 import { logEvent, recordUsage } from "./db.js";
 import { loadSettings } from "./settings.js";
@@ -65,9 +65,9 @@ export function ensureWorkspaceTrusted(cwd) {
  *
  * Returns { ok, output } — output is combined text tail for logging.
  */
-export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation }) {
+export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation, imagePaths = [] }) {
   if (loadSettings().llm.mode === "api") {
-    return runApiAgent({ jobId, stage, cwd, prompt, onProgress, usageOperation });
+    return runApiAgent({ jobId, stage, cwd, prompt, onProgress, usageOperation, imagePaths });
   }
   return new Promise((resolve) => {
     const task = async () => {
@@ -262,13 +262,24 @@ const API_TOOLS = [
   { type: "function", function: { name: "run_command", description: "在工作区中运行必要的项目命令，例如 npm install、tsc 或构建检查", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } } },
 ];
 
-async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation }) {
+async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation, imagePaths = [] }) {
   const { llm } = loadSettings();
   logEvent(jobId, stage, `API agent start (${llm.provider}/${llm.model})`);
   try {
+    const userContent = imagePaths.length
+      ? [
+          { type: "text", text: prompt },
+          ...imagePaths.map((path) => {
+            const mime = extname(path).toLowerCase() === ".png" ? "image/png"
+              : extname(path).toLowerCase() === ".webp" ? "image/webp"
+                : "image/jpeg";
+            return { type: "image_url", image_url: { url: `data:${mime};base64,${readFileSync(path).toString("base64")}` } };
+          }),
+        ]
+      : prompt;
     const messages = [
       { role: "system", content: "你是 VideoForge 的代码与内容制作代理。只能操作当前工作区。必须实际调用工具完成任务并进行检查，不要只给建议。" },
-      { role: "user", content: prompt },
+      { role: "user", content: userContent },
     ];
     reportProgress(jobId, stage, onProgress, 22, "模型已连接，正在分析任务");
     // 上限按最大作品规模留余量：5 章作品实测 ~40+ 轮（每章 read/write/tsc

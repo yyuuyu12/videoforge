@@ -1,6 +1,9 @@
+import { existsSync, readdirSync, rmSync } from "node:fs";
+import { join } from "node:path";
 import { db, getJob, logEvent, updateJob } from "../db.js";
-import { nextStage, runStage, stageDef } from "../stages.js";
+import { nextStage, repairChapterQuality, runStage, stageDef } from "../stages.js";
 import { buildPresentation } from "../preview.js";
+import { auditPreviewQuality } from "../render.js";
 
 /**
  * DB-backed job runner. Picks queued jobs, runs their current stage,
@@ -49,6 +52,20 @@ async function advance(jobId) {
       if (job.stage === "chapter_gen") {
         try {
           await buildPresentation(getJob(jobId));
+          let audit = await auditPreviewQuality(getJob(jobId));
+          for (let attempt = 1; !audit.pass && attempt <= 3; attempt += 1) {
+            const worst = audit.worstStep;
+            logEvent(jobId, "quality", `自动画面验收 ${audit.score}/100，开始第 ${attempt}/3 次修复${worst ? `（第 ${worst.chapter + 1} 章第 ${worst.step + 1} 屏）` : ""}`, "error");
+            const repaired = await repairChapterQuality(getJob(jobId), audit);
+            if (!repaired.ok) throw new Error(`第 ${attempt} 次自动修复失败：${repaired.note || "模型未完成修复"}`);
+            await buildPresentation(getJob(jobId));
+            audit = await auditPreviewQuality(getJob(jobId));
+          }
+          if (!audit.pass) {
+            const worst = audit.worstStep;
+            throw new Error(`逐屏画面验收仅 ${audit.score}/100，低于 90 分${worst ? `；最低分为第 ${worst.chapter + 1} 章第 ${worst.step + 1} 屏` : ""}。已保留最低分截图，未进入人工验收。`);
+          }
+          logEvent(jobId, "quality", `逐屏画面验收通过：${audit.score}/100，共检查 ${audit.checkedSteps} 屏`);
         } catch (error) {
           result = { ok: false, note: `画面构建未通过，尚未进入验收：${error.message}` };
           updateJob(jobId, { status: "failed", error: result.note });
@@ -98,6 +115,25 @@ export function retryJob(jobId, stage) {
   if (!job) return false;
   const targetStage = stage ?? job.stage;
   if (["queued", "running"].includes(job.status) && targetStage === job.stage) return true;
+  if (targetStage === "gate_style" && job.stage !== "gate_style") {
+    // Changing style is a full visual restart. Keeping the previous
+    // presentation makes chapterGeneration report N/N and lets stale slides,
+    // subtitles, audio and avatar artifacts leak into the new run.
+    const presentation = join(job.workspace, "presentation");
+    if (existsSync(presentation)) {
+      // A legacy Vite preview may keep this directory as its Windows cwd,
+      // which makes removing the root fail with EPERM. Clearing every child
+      // preserves the locked root while still guaranteeing a fresh scaffold.
+      for (const name of readdirSync(presentation)) {
+        rmSync(join(presentation, name), { recursive: true, force: true });
+      }
+    }
+    rmSync(join(job.workspace, "render-tmp"), { recursive: true, force: true });
+    rmSync(join(job.workspace, "output.mp4"), { force: true });
+    rmSync(join(job.workspace, "render-meta.json"), { force: true });
+    db.prepare("DELETE FROM chapter_reviews WHERE job_id = ?").run(jobId);
+    logEvent(jobId, targetStage, "已清空旧画面和下游产物，新风格将从 0 章重新生成");
+  }
   updateJob(jobId, { ...(stage ? { stage } : {}), status: "queued", error: null });
   logEvent(jobId, targetStage, "手动重试");
   return true;

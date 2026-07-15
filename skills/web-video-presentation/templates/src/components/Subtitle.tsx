@@ -11,11 +11,28 @@ interface SubtitleProps {
   getAudioEl: () => HTMLAudioElement | null;
 }
 
+function chunkFallbackText(text: string) {
+  const chunks: string[] = [];
+  let current = "";
+  const flush = () => {
+    const value = current.replace(/[，、；,;]\s*$/, "").trim();
+    if (value) chunks.push(value);
+    current = "";
+  };
+  for (const char of text.trim()) {
+    if (!current && /[，、；,;\s]/.test(char)) continue;
+    current += char;
+    if (/[。！？.!?…]/.test(char) || (/[，、；,;]/.test(char) && current.length >= 6) || current.length >= 10) flush();
+  }
+  flush();
+  return chunks;
+}
+
 function cueAtTime(cues: SubtitleCue[], timeMs: number): number {
   // Cues are ordered by start time. Find the last cue that has begun.
   let low = 0;
   let high = cues.length - 1;
-  let result = 0;
+  let result = -1;
 
   while (low <= high) {
     const middle = Math.floor((low + high) / 2);
@@ -40,11 +57,13 @@ export function Subtitle({ chapterId, step, fallbackText, getAudioEl }: Subtitle
     () => SUBTITLE_CUES[chapterId]?.[step] ?? [],
     [chapterId, step],
   );
-  const [activeCue, setActiveCue] = useState(0);
+  const [activeCue, setActiveCue] = useState(-1);
+  const [fallbackCue, setFallbackCue] = useState(0);
   const hasCues = cues.length > 0;
+  const fallbackCues = useMemo(() => chunkFallbackText(fallbackText), [fallbackText]);
 
   useEffect(() => {
-    setActiveCue(0);
+    setActiveCue(-1);
     if (!hasCues) return;
 
     let frame = 0;
@@ -64,7 +83,24 @@ export function Subtitle({ chapterId, step, fallbackText, getAudioEl }: Subtitle
     return () => cancelAnimationFrame(frame);
   }, [cues, getAudioEl, hasCues]);
 
-  const text = hasCues ? cues[activeCue]?.text ?? cues[0]!.text : fallbackText;
+  useEffect(() => {
+    setFallbackCue(0);
+    if (hasCues || fallbackCues.length < 2) return;
+    let frame = 0;
+    const startedAt = performance.now();
+    const rotate = (now: number) => {
+      setFallbackCue(Math.floor((now - startedAt) / 1800) % fallbackCues.length);
+      frame = requestAnimationFrame(rotate);
+    };
+    frame = requestAnimationFrame(rotate);
+    return () => cancelAnimationFrame(frame);
+  }, [fallbackCues, hasCues]);
+
+  const text = hasCues
+    ? activeCue >= 0
+      ? cues[activeCue]?.text ?? ""
+      : ""
+    : fallbackCues[fallbackCue] ?? "";
   if (!text) return null;
 
   return (

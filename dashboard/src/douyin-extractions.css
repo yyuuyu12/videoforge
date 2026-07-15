@@ -13,7 +13,10 @@
 .vf-extraction-item header b { overflow:hidden; color:#4a3220; font-size:14px; text-overflow:ellipsis; white-space:nowrap; }
 .vf-extraction-status { display:flex; justify-content:space-between; gap:16px; margin-top:14px; color:#65503b; font-size:12px; }
 .vf-extraction-status strong { color:#2e7d4f; }
-.vf-extraction-item progress { width:100%; height:8px; margin-top:7px; accent-color:#2e7d4f; }
+.vf-extraction-item progress { width:100%; height:4px; margin-top:7px; overflow:hidden; border:0; border-radius:99px; background:rgba(46,125,79,.055); appearance:none; }
+.vf-extraction-item progress::-webkit-progress-bar { background:rgba(46,125,79,.055); }
+.vf-extraction-item progress::-webkit-progress-value { border-radius:99px; background:rgba(46,125,79,.3); }
+.vf-extraction-item progress::-moz-progress-bar { border-radius:99px; background:rgba(46,125,79,.3); }
 .vf-extraction-item > p { margin:8px 0 0; color:#8c7a66; font-size:11px; }
 .vf-extraction-item > p.error { color:#b04338; }
 .vf-extraction-result { margin-top:10px; color:#6f5943; font-size:11px; }

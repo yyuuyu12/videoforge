@@ -21,18 +21,13 @@
   text-shadow: 0 3px 14px color-mix(in srgb, var(--surface) 88%, transparent);
 }
 
-/* Timestamped cues are deliberately one large, uninterrupted line. */
-.subtitle__cue {
-  white-space: nowrap;
-}
-
-/* Generated timings can be absent during authoring; keep that fallback tidy. */
+/* Both timed and authoring fallback subtitles stay on one short line. */
+.subtitle__cue,
 .subtitle__fallback {
-  display: -webkit-box;
   overflow: hidden;
-  max-width: 1400px;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
+  max-width: 100%;
+  text-overflow: clip;
+  white-space: nowrap;
 }
 /* VideoForge product preset: generated from jobs.meta. */
 .subtitle {

@@ -20,9 +20,11 @@ const segments = JSON.parse(readFileSync(join(root, "audio-segments.json"), "utf
 // ---- chunking primitives (ported from chunk-subtitle.mjs, timestamp-aware) ----
 const SENTENCE_END = /[。！？.!?…]/;
 const SOFT_BREAK = /[，、；,;]/;
-const TARGET_CHARS = 10;
-const HARD_MAX_CHARS = 14;
-const ABSOLUTE_MAX_CHARS = 22;
+// Keep cues close to the requested mobile short-video rhythm: about ten
+// characters, with a hard single-line ceiling and punctuation-aware breaks.
+const TARGET_CHARS = 8;
+const HARD_MAX_CHARS = 10;
+const ABSOLUTE_MAX_CHARS = 10;
 const TOKEN_RUN = /[A-Za-z0-9_./-]+/y;
 
 function tokenize(text) {
@@ -104,6 +106,17 @@ function chunkWithTimestamps(atoms) {
   return chunks;
 }
 
+function validateCues(cues, source) {
+  const failures = cues.filter((cue) =>
+    /\n|\r/.test(cue.text)
+    || (cue.text.length > ABSOLUTE_MAX_CHARS && !/^[A-Za-z0-9_./-]+$/.test(cue.text)),
+  );
+  if (failures.length) {
+    throw new Error(`subtitle cue validation failed for ${source}: ${failures.map((cue) => cue.text).join(" | ")}`);
+  }
+  return cues;
+}
+
 function cuesForWordsFile(path) {
   const data = JSON.parse(readFileSync(path, "utf8"));
   // Flatten every top-level segment's timestamped_words in order. Each
@@ -145,7 +158,7 @@ for (const seg of segments) {
   const wordsPath = join(root, "public", "audio", seg.audio.replace(/\.mp3$/, ".words.json"));
   byChapter[seg.chapter] ??= [];
   if (existsSync(wordsPath)) {
-    byChapter[seg.chapter].push(cuesForWordsFile(wordsPath));
+    byChapter[seg.chapter].push(validateCues(cuesForWordsFile(wordsPath), wordsPath));
     withCues++;
   } else {
     byChapter[seg.chapter].push([]);

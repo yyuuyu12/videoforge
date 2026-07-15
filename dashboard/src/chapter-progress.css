@@ -16,7 +16,10 @@
 .vf-chapter-monitor > header span { color: #9a866f; font-size: 10px; }
 .vf-chapter-monitor > header b { color: #493522; font-size: 13px; }
 .vf-chapter-monitor > header strong { color: #2e7d4f; font: 700 20px/1.2 Georgia, "Noto Sans SC", serif; }
-.vf-chapter-monitor > progress { width: 100%; height: 7px; margin: 12px 0 7px; accent-color: #2e7d4f; }
+.vf-chapter-monitor > progress { width:100%; height:4px; margin:12px 0 7px; overflow:hidden; border:0; border-radius:99px; background:rgba(46,125,79,.055); appearance:none; }
+.vf-chapter-monitor > progress::-webkit-progress-bar { background:rgba(46,125,79,.055); }
+.vf-chapter-monitor > progress::-webkit-progress-value { border-radius:99px; background:rgba(46,125,79,.34); }
+.vf-chapter-monitor > progress::-moz-progress-bar { border-radius:99px; background:rgba(46,125,79,.34); }
 .vf-chapter-monitor > p { margin: 0 0 14px !important; color: #7f6d59 !important; font-size: 11px !important; }
 
 .vf-chapter-review-list {

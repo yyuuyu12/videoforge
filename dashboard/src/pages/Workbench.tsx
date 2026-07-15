@@ -6,6 +6,9 @@ import {
   type JobAudit,
   type JobDetail,
 } from "../api";
+import { splitWorkTitle } from "../lib/workTitle";
+
+type FeedbackImage = { name: string; mime: string; dataBase64: string; previewUrl: string };
 
 const phases = [
   "原文确认",
@@ -198,6 +201,8 @@ export function Workbench({
   const [selectedChapter, setSelectedChapter] = useState<string | null>(null);
   const [chapterFeedbackScope, setChapterFeedbackScope] = useState<"chapter" | "global">("chapter");
   const [messageDrafts, setMessageDrafts] = useState<Record<string, string>>({});
+  const [feedbackImage, setFeedbackImage] = useState<FeedbackImage | null>(null);
+  const [feedbackImageError, setFeedbackImageError] = useState("");
   const [feedbackSending, setFeedbackSending] = useState(false);
   const [busy, setBusy] = useState(false);
   const [uploadState, setUploadState] = useState("");
@@ -224,6 +229,10 @@ export function Workbench({
     load();
     const timer = window.setInterval(load, 3000);
     return () => clearInterval(timer);
+  }, [jobId]);
+  useEffect(() => {
+    setFeedbackImage(null);
+    setFeedbackImageError("");
   }, [jobId]);
   useEffect(() => {
     setSourceEditing(false);
@@ -352,6 +361,7 @@ export function Workbench({
   const meta = useMemo(() => (job ? parseMeta(job) : {}), [job]);
   if (!job || selected === null) return <WorkbenchLoading />;
   const current = phaseIndex(job);
+  const workTitle = splitWorkTitle(job.title);
   const activePhase = phases[selected];
   const chatEnabled = conversationalPhases.has(activePhase)
     && (activePhase !== "逐页生成" || Boolean(selectedChapter));
@@ -399,18 +409,38 @@ export function Workbench({
   );
   const submitFeedback = async () => {
     const content = message.trim();
-    if (!content || feedbackSending || feedbackRunning) return;
+    if ((!content && !feedbackImage) || feedbackSending || feedbackRunning) return;
     setFeedbackSending(true);
     setPreviewNotice("");
     try {
-      const submitted = await api.sendFeedback(job.id, chapterScope, content, activePhase);
+      const submitted = await api.sendFeedback(job.id, chapterScope, content, activePhase, feedbackImage ? {
+        name: feedbackImage.name, mime: feedbackImage.mime, dataBase64: feedbackImage.dataBase64,
+      } : undefined);
       trackedFeedbackIds.current.add(submitted.feedbackId);
       feedbackStatuses.current.set(submitted.feedbackId, "running");
       setMessageDrafts((drafts) => ({ ...drafts, [draftKey]: "" }));
+      setFeedbackImage(null);
+      setFeedbackImageError("");
       await load();
     } finally {
       setFeedbackSending(false);
     }
+  };
+  const handleFeedbackPaste = (event: React.ClipboardEvent<HTMLTextAreaElement>) => {
+    const item = Array.from(event.clipboardData.items).find((entry) => entry.type.startsWith("image/"));
+    if (!item) return;
+    event.preventDefault();
+    const file = item.getAsFile();
+    if (!file) return;
+    if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) { setFeedbackImageError("仅支持 PNG、JPEG 或 WebP 图片"); return; }
+    if (file.size > 5 * 1024 * 1024) { setFeedbackImageError("图片不能超过 5MB"); return; }
+    const reader = new FileReader();
+    reader.onload = () => {
+      const value = String(reader.result || "");
+      setFeedbackImage({ name: file.name || "pasted-image.png", mime: file.type, dataBase64: value.split(",", 2)[1] || "", previewUrl: value });
+      setFeedbackImageError("");
+    };
+    reader.readAsDataURL(file);
   };
   const retryFailedStage = async () => {
     if (busy) return;
@@ -1323,7 +1353,10 @@ export function Workbench({
         <button onClick={onBack}>← 返回作品</button>
         <div>
           <span>作品 #{job.id}</span>
-          <h1 title={job.title ?? "未命名作品"}>{job.title ?? "未命名作品"}</h1>
+          <div className="vf-work-title-line" title={workTitle.original}>
+            <h1>{workTitle.main}</h1>
+            {workTitle.tags.length > 0 && <div className="vf-title-tags">{workTitle.tags.map((tag) => <span key={tag}>{tag}</span>)}</div>}
+          </div>
         </div>
         <em>
             {job.status === "done"
@@ -1395,7 +1428,7 @@ export function Workbench({
       )}
       <div className={`vf-studio ${!chatEnabled ? "vf-studio-full" : ""}`}>
         <section className="vf-stage-panel">
-          {content}
+          <div className="vf-stage-scroll">{content}</div>
           {activeFeedback && ["口播稿审阅", "逐页生成"].includes(activePhase) && (
             <div className="vf-stage-update-mask" role="status" aria-live="polite">
               <span className="vf-loading-ring" />
@@ -1420,6 +1453,7 @@ export function Workbench({
               phaseFeedback.map((item) => (
                 <p key={item.id} className="vf-chat-message">
                   {item.message}
+                  {item.attachment_url && <img className="vf-chat-attachment" src={item.attachment_url} alt="参考截图" />}
                   {item.status === "running" && <span className="vf-feedback-progress" aria-label={`修改进度 ${item.progress || 0}%`}><i style={{ width: `${item.progress || 0}%` }} /></span>}
                   <small className={item.status === "failed" ? "error" : ""}>
                     {item.status === "done"
@@ -1436,9 +1470,12 @@ export function Workbench({
             )}
           </div>
           <div className="vf-chat-input">
+            {feedbackImage && <div className="vf-feedback-attachment"><img src={feedbackImage.previewUrl} alt="待发送的参考截图" /><button type="button" aria-label="移除图片" title="移除图片" onClick={() => setFeedbackImage(null)}>×</button></div>}
+            {feedbackImageError && <small className="vf-feedback-image-error">{feedbackImageError}</small>}
             <textarea
               value={message}
               onChange={(e) => setMessageDrafts((drafts) => ({ ...drafts, [draftKey]: e.target.value }))}
+              onPaste={handleFeedbackPaste}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
@@ -1448,7 +1485,7 @@ export function Workbench({
               placeholder="说说你想怎么改… Enter 发送，Shift+Enter 换行"
             />
             <button
-              disabled={!message.trim() || feedbackSending || feedbackRunning}
+              disabled={(!message.trim() && !feedbackImage) || feedbackSending || feedbackRunning}
               onClick={() => void submitFeedback()}
             >
               →

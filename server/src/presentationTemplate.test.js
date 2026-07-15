@@ -4,7 +4,7 @@ import { mkdir, mkdtemp, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { synchronizePresentationThemeFiles } from "./stages.js";
+import { orderedAvatarAudioFiles, synchronizePresentationThemeFiles } from "./stages.js";
 
 const templateRoot = fileURLToPath(
   new URL("../../skills/web-video-presentation/templates/src/", import.meta.url),
@@ -42,6 +42,47 @@ test("style regeneration invalidates the previous static preview", async () => {
   const stages = await readFile(fileURLToPath(new URL("./stages.js", import.meta.url)), "utf8");
   assert.match(stages, /rmSync\(join\(target, "dist", "\.build-fingerprint"\)/);
   assert.match(stages, /进度文件必须通过 write_file 工具按 UTF-8 写入/);
+});
+
+test("quality audit traverses every presentation step and keeps the worst score", async () => {
+  const render = await readFile(fileURLToPath(new URL("./render.js", import.meta.url)), "utf8");
+  assert.match(render, /for \(let index = 0; index < 250; index \+= 1\)/);
+  assert.match(render, /page\.keyboard\.press\("ArrowRight"\)/);
+  assert.match(render, /item\.score < lowest\.score/);
+  assert.match(render, /subtitleText\.length > 10/);
+  assert.match(render, /headingViolations\.length \* 20/);
+});
+
+test("chapter generation repairs low quality instead of entering approval", async () => {
+  const pipeline = await readFile(fileURLToPath(new URL("./workers/pipeline.js", import.meta.url)), "utf8");
+  assert.match(pipeline, /!audit\.pass && attempt <= 3/);
+  assert.match(pipeline, /repairChapterQuality\(getJob\(jobId\), audit\)/);
+  assert.match(pipeline, /if \(!audit\.pass\)/);
+  assert.match(pipeline, /audit\.score.*90/);
+});
+
+test("avatar audio follows the presentation manifest instead of folder sorting", async () => {
+  const root = await mkdtemp(join(tmpdir(), "videoforge-avatar-order-"));
+  const audioRoot = join(root, "public", "audio");
+  await mkdir(join(audioRoot, "accumulate"), { recursive: true });
+  await mkdir(join(audioRoot, "hook"), { recursive: true });
+  await writeFile(join(audioRoot, "accumulate", "1.mp3"), "a");
+  await writeFile(join(audioRoot, "hook", "1.mp3"), "h");
+  await writeFile(join(root, "audio-segments.json"), JSON.stringify([
+    { audio: "hook/1.mp3" },
+    { audio: "accumulate/1.mp3" },
+  ]));
+  const files = orderedAvatarAudioFiles(root, audioRoot);
+  assert.deepEqual(files.map((file) => file.replace(/\\/g, "/").split("/").slice(-2).join("/")), [
+    "hook/1.mp3",
+    "accumulate/1.mp3",
+  ]);
+});
+
+test("avatar preview API uses manifest chapter order", async () => {
+  const routes = await readFile(fileURLToPath(new URL("./routes.js", import.meta.url)), "utf8");
+  assert.match(routes, /chapterOrder = \[\.\.\.new Set/);
+  assert.match(routes, /order\.get\(a\.replace/);
 });
 
 test("product-selected theme overrides agent theme drift", async () => {

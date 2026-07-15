@@ -188,6 +188,26 @@ async function splitAvatarPreviews(job, files, lipsync, avatarDir, presDir) {
   return { ok: true };
 }
 
+export function orderedAvatarAudioFiles(presDir, audioRoot) {
+  const manifest = join(presDir, "audio-segments.json");
+  if (existsSync(manifest)) {
+    try {
+      const segments = JSON.parse(readFileSync(manifest, "utf8"));
+      const ordered = segments
+        .map((segment) => join(audioRoot, String(segment.audio || "")))
+        .filter((file) => existsSync(file));
+      if (ordered.length === segments.length && ordered.length > 0) return ordered;
+    } catch {
+      // Fall through to deterministic discovery for legacy presentations.
+    }
+  }
+  const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    return entry.isDirectory() ? walk(path) : entry.name.endsWith(".mp3") ? [path] : [];
+  });
+  return walk(audioRoot).sort();
+}
+
 async function wireAvatarWithAgent(job, meta, presDir) {
   const skill = config.skills.videoAvatarSubtitles;
   const positionKey = meta.avatar?.position || "right-third";
@@ -546,11 +566,10 @@ const runners = {
     if (!existsSync(source)) return { ok: false, note: "所选数字人视频不存在，请重新从素材库选择" };
     const presDir = join(job.workspace, "presentation");
     const audioRoot = join(presDir, "public", "audio");
-    const walk = (dir) => readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
-      const p = join(dir, entry.name);
-      return entry.isDirectory() ? walk(p) : entry.name.endsWith(".mp3") ? [p] : [];
-    });
-    const files = walk(audioRoot).sort();
+    // The avatar video must use the exact presentation timeline. Alphabetic
+    // directory sorting puts "accumulate" before "hook" and makes every
+    // subsequent lip-sync offset wrong even though all files exist.
+    const files = orderedAvatarAudioFiles(presDir, audioRoot);
     if (!files.length) return { ok: false, note: "没有找到配音文件" };
     avatarProgress(job.id, 6, `整理 ${files.length} 段配音`);
     const avatarDir = join(presDir, "public", "avatar");
@@ -702,8 +721,57 @@ export async function runStage(job) {
   return runner(job);
 }
 
+/** Repair the lowest-scoring rendered steps using the audit screenshots as
+ * multimodal evidence. The pipeline calls this only after a complete build,
+ * then rebuilds and audits again before allowing chapter approval. */
+export async function repairChapterQuality(job, audit) {
+  const skill = config.skills.webVideoPresentation;
+  const failed = [...(audit.steps || [])]
+    .filter((step) => !step.pass)
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 6);
+  if (!failed.length) return { ok: true, note: "没有需要修复的低分画面" };
+  const imagePaths = failed.map((step) => join(
+    job.workspace,
+    "presentation",
+    "public",
+    "quality-audit",
+    step.screenshot,
+  )).filter(existsSync);
+  const findings = failed.map((step) => ({
+    chapter: step.chapter + 1,
+    step: step.step + 1,
+    score: step.score,
+    screenshot: step.screenshot,
+    collisions: step.visual?.collisions || 0,
+    overflow: step.overflowCount || 0,
+    subtitleChars: step.visual?.subtitleTextLength || 0,
+    subtitleLines: step.visual?.subtitleLines || 0,
+    longContentBlocks: step.visual?.longContentBlocks || 0,
+  }));
+  const prompt = [
+    "当前目录是 VideoForge 网页演示项目。自动逐屏截图验收未达到 90 分，必须直接修改 presentation 代码并修复，不要只解释或输出自检清单。",
+    `必须重新阅读 ${skill}/references/CHAPTER-CRAFT.md，并把它作为硬性验收标准。`,
+    "已附上最低分画面的真实 1920×1080 截图。先逐张观察重叠、拥挤、字幕遮挡、文字密度和安全区问题，再定位对应章节代码。",
+    `失败明细：${JSON.stringify(findings)}`,
+    "硬性要求：每屏只保留一个主结论；正文说明最多两条且每条一行；单块中文正文超过 28 字必须删减或拆 step，禁止缩小字号硬塞。",
+    "字幕必须与对应 narration/音频 step 一一对应，每次只显示一行短句，中文目标 8 字、硬上限 10 字，下一句出现时上一句消失。",
+    "字幕安全带和数字人安全区内不得放正文、图表、关键数字或高对比装饰。任何非设计性重叠都必须消除。",
+    "如果拆分或合并 step，必须同步维护组件条件、narrations.ts、chapters.ts 和 useStepper STORAGE_KEY；不得只改字幕或只改声音造成音画错位。",
+    "完成后运行 npx tsc --noEmit。不要向用户提问，修完即退出。",
+  ].join("\n");
+  return runAgent({
+    jobId: job.id,
+    stage: "quality_repair",
+    cwd: job.workspace,
+    prompt,
+    usageOperation: "visual-quality-repair",
+    imagePaths,
+  });
+}
+
 /** Feedback -> scoped debug agent run against one chapter (or global). */
-export async function runFeedback(job, { chapter, message, phase, onProgress = () => {} }) {
+export async function runFeedback(job, { chapter, message, phase, attachmentPath = null, onProgress = () => {} }) {
   onProgress(10, "正在理解你的修改要求");
   const skill = config.skills.webVideoPresentation;
   const options = jobOptions(job);
@@ -732,12 +800,14 @@ export async function runFeedback(job, { chapter, message, phase, onProgress = (
   const prompt = [
     `当前目录是一个 VideoForge 作品工作区，用户正在“${phase || "画面调试"}”环节提出修改反馈。`,
     `用户反馈：${message}`,
+    attachmentPath ? `用户同时提供了参考截图：${attachmentPath}。必须先读取并分析图片中的拥挤、重叠、字号、字幕或音画对应问题，再修改代码；回执中说明从截图观察到了什么。` : "",
     scopeLine,
     `严格执行最小改动：用户只要求样式时，禁止修改任何可见文案、narrations.ts、step 数和组件结构；用户只要求文案时，禁止改布局和样式。`,
+    `如果用户反馈“拥挤、重叠、字太多、堆在一起、看不清”，这属于结构问题而不是纯样式问题：允许删减次要屏幕文字、重排组件或拆分 step，并同步维护 narrations.ts 与 step 数；禁止通过缩小字号硬塞。`,
     `${subtitleSafety} 安全带内不得放正文、关键数字、图表或高对比装饰；数字人与字幕同时启用时取两者安全区并集。`,
     `如果作品启用了数字人，右侧讲师安全区必须保持为空，不得加入卡片、摘要、图表或装饰内容；只能放数字人视频或低对比度的占位提示。`,
     `修改前后必须自行检查 git diff（即使项目未纳入 git，也要逐文件核对），发现超出用户要求的改动必须撤回。`,
-    `修改时遵守 ${skill}/references/CHAPTER-CRAFT.md 的规范（主题 token / 字号 ≥20px / 反AI味）。`,
+    `修改时遵守 ${skill}/references/CHAPTER-CRAFT.md 的规范（单屏信息预算 / 无重叠 / 主题 token / 反AI味）。`,
     `完成后 npx tsc --noEmit 必须 0 错误。不要向用户提问，做完即退出。`,
     `最后必须用中文输出简短回执，严格包含三段：`,
     `具体修改：列出实际改动的文件或内容，不要只说“已优化”。`,
@@ -754,7 +824,7 @@ export async function runFeedback(job, { chapter, message, phase, onProgress = (
         : phase === "数字人"
           ? "avatar-refine"
           : "refine";
-  return runAgent({ jobId: job.id, stage: "debug", cwd: job.workspace, prompt, onProgress, usageOperation });
+  return runAgent({ jobId: job.id, stage: "debug", cwd: job.workspace, prompt, onProgress, usageOperation, imagePaths: attachmentPath ? [join(job.workspace, attachmentPath)] : [] });
 }
 
 export function readArticleTitle(workspace) {

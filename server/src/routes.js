@@ -9,7 +9,7 @@ import { runFeedback, STAGES } from "./stages.js";
 import { previewStatus, startPreview, stopPreview } from "./preview.js";
 import { decodeUtf8OrGb18030 } from "./textEncoding.js";
 import { readRegistryChapterTitles } from "./chapterMetadata.js";
-import { renderJob } from "./render.js";
+import { auditPreviewQuality, renderJob } from "./render.js";
 import { loadSettings, publicSettings, saveSettings } from "./settings.js";
 import { testLlmConnection } from "./providers.js";
 import { cloneVoice, synthesize, testKey } from "./minimax.js";
@@ -725,13 +725,39 @@ api.get("/jobs/:id", (req, res) => {
     || null;
   const feedback = db
     .prepare("SELECT * FROM feedback WHERE job_id = ? ORDER BY id DESC LIMIT 50")
-    .all(job.id);
+    .all(job.id)
+    .map(({ attachment_path: attachmentPath, ...item }) => ({
+      ...item,
+      attachment_url: attachmentPath ? `/api/jobs/${job.id}/feedback/${item.id}/attachment` : null,
+    }));
   const outputPath = join(job.workspace, "output.mp4");
   let output = { exists: existsSync(outputPath), rendering: renderingJobs.has(job.id) };
   if (output.exists) {
     try { output = { ...JSON.parse(readFileSync(join(job.workspace, "render-meta.json"), "utf8")), ...output }; } catch {}
   }
   res.json({ ...job, error: displayError, events, feedback, output, chapterGeneration: chapterGeneration(job), devServer: previewStatus(job) });
+});
+
+api.get("/jobs/:id/quality-audit", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  const reportPath = join(job.workspace, "presentation", "public", "quality-audit.json");
+  if (!existsSync(reportPath)) return res.status(404).json({ error: "quality audit not available" });
+  try {
+    return res.json(JSON.parse(readFileSync(reportPath, "utf8")));
+  } catch {
+    return res.status(500).json({ error: "quality audit is invalid" });
+  }
+});
+
+api.post("/jobs/:id/quality-audit", async (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  try {
+    return res.json(await auditPreviewQuality(job));
+  } catch (error) {
+    return res.status(409).json({ error: error instanceof Error ? error.message : String(error) });
+  }
 });
 
 api.put("/jobs/:id/options", (req, res) => {
@@ -831,9 +857,24 @@ api.get("/jobs/:id/audit", async (req, res) => {
 api.get("/jobs/:id/avatar/previews", (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "not found" });
-  const dir = join(job.workspace, "presentation", "public", "avatar", "chapters");
+  const presentation = join(job.workspace, "presentation");
+  const dir = join(presentation, "public", "avatar", "chapters");
   if (!existsSync(dir)) return res.json([]);
-  res.json(readdirSync(dir).filter((name) => name.endsWith(".mp4")).sort().map((name) => ({
+  const files = readdirSync(dir).filter((name) => name.endsWith(".mp4"));
+  const manifest = join(presentation, "audio-segments.json");
+  let chapterOrder = [];
+  if (existsSync(manifest)) {
+    try {
+      chapterOrder = [...new Set(JSON.parse(readFileSync(manifest, "utf8")).map((segment) => segment.chapter))];
+    } catch {}
+  }
+  const order = new Map(chapterOrder.map((chapter, index) => [chapter, index]));
+  files.sort((a, b) => {
+    const ai = order.get(a.replace(/\.mp4$/, "")) ?? Number.MAX_SAFE_INTEGER;
+    const bi = order.get(b.replace(/\.mp4$/, "")) ?? Number.MAX_SAFE_INTEGER;
+    return ai - bi || a.localeCompare(b);
+  });
+  res.json(files.map((name) => ({
     id: name.replace(/\.mp4$/, ""),
     name,
     url: `/api/jobs/${job.id}/avatar/previews/${encodeURIComponent(name)}`,
@@ -928,12 +969,35 @@ api.post("/jobs/:id/retry", (req, res) => {
   res.json({ ok: retryJob(Number(req.params.id), req.body?.stage) });
 });
 
+api.get("/jobs/:id/feedback/:feedbackId/attachment", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).end();
+  const item = db.prepare("SELECT attachment_path, attachment_mime FROM feedback WHERE id = ? AND job_id = ?")
+    .get(Number(req.params.feedbackId), job.id);
+  if (!item?.attachment_path) return res.status(404).end();
+  const path = resolve(job.workspace, item.attachment_path);
+  const rel = relative(resolve(job.workspace), path);
+  if (rel.startsWith("..") || isAbsolute(rel) || !existsSync(path)) return res.status(404).end();
+  res.type(item.attachment_mime || "application/octet-stream").sendFile(path);
+});
+
 /** 对话修改：执行局部修改，并在画面相关阶段重建静态预览。 */
 api.post("/jobs/:id/feedback", async (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "not found" });
-  const { chapter, message, phase } = req.body ?? {};
-  if (!message) return res.status(400).json({ error: "message required" });
+  const { chapter, phase, attachment } = req.body ?? {};
+  const message = String(req.body?.message || "").trim() || (attachment ? "请根据参考图片检查并调整当前页面" : "");
+  if (!message) return res.status(400).json({ error: "请填写修改要求或粘贴一张参考图片" });
+  let attachmentBuffer = null;
+  let attachmentExtension = null;
+  const allowedImages = new Map([["image/png", ".png"], ["image/jpeg", ".jpg"], ["image/webp", ".webp"]]);
+  if (attachment) {
+    attachmentExtension = allowedImages.get(String(attachment.mime || "").toLowerCase());
+    if (!attachmentExtension) return res.status(415).json({ error: "只支持 PNG、JPEG 或 WebP 图片" });
+    attachmentBuffer = Buffer.from(String(attachment.dataBase64 || ""), "base64");
+    if (!attachmentBuffer.length) return res.status(400).json({ error: "粘贴的图片内容为空" });
+    if (attachmentBuffer.length > 5 * 1024 * 1024) return res.status(413).json({ error: "图片不能超过 5MB" });
+  }
   const feedbackPhases = ["口播稿审阅", "逐页生成", "配音字幕", "数字人"];
   const previewAffectingPhases = new Set(["逐页生成", "配音字幕", "数字人"]);
   if (!feedbackPhases.includes(phase)) {
@@ -949,6 +1013,15 @@ api.post("/jobs/:id/feedback", async (req, res) => {
   const f = db
     .prepare("INSERT INTO feedback (job_id, chapter, phase, message, status, progress, progress_message) VALUES (?, ?, ?, ?, 'running', 5, ?)")
     .run(job.id, chapter ?? null, phase, message, "修改请求已提交，等待模型开始");
+  let attachmentPath = null;
+  if (attachmentBuffer && attachmentExtension) {
+    const relativeDir = "feedback-attachments";
+    attachmentPath = `${relativeDir}/feedback-${f.lastInsertRowid}${attachmentExtension}`;
+    mkdirSync(join(job.workspace, relativeDir), { recursive: true });
+    writeFileSync(join(job.workspace, attachmentPath), attachmentBuffer);
+    db.prepare("UPDATE feedback SET attachment_path = ?, attachment_mime = ? WHERE id = ?")
+      .run(attachmentPath, String(attachment.mime).toLowerCase(), f.lastInsertRowid);
+  }
   if (chapter && phase === "逐页生成") {
     db.prepare(`
       INSERT INTO chapter_reviews (job_id, chapter_key, status) VALUES (?, ?, 'review')
@@ -962,6 +1035,7 @@ api.post("/jobs/:id/feedback", async (req, res) => {
       chapter,
       message,
       phase,
+      attachmentPath,
       onProgress: (progress, progressMessage) => db.prepare(
         "UPDATE feedback SET progress = ?, progress_message = ? WHERE id = ?",
       ).run(Math.max(0, Math.min(100, Math.round(progress))), progressMessage, f.lastInsertRowid),
