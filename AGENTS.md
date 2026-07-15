@@ -36,8 +36,7 @@ SQLite（`data.db`）：`articles` / `jobs` / `job_events` / `feedback` / `douyi
 | 安装、启动、依赖服务、常见故障 | `OPERATIONS.md` |
 | 长期技术决策、已验证事实、修改纪律 | `PROJECT-MEMORY.md` |
 | 做 UI / 页面交互 | `PRODUCT-SPEC.md` |
-| 架构与模块边界（现状权威） | `ARCHITECTURE.md` |
-| 未来规划、商业与云端路线（**不是现状**） | `PRODUCT-PLAN.md` |
+| 未来规划、云端架构（**不是现状**） | `ARCHITECTURE.md`、`PRODUCT-PLAN.md` |
 | 文件归属与提交规则 | `docs/FILE-OWNERSHIP.md` |
 | 历史测试报告 | `docs/reports/` |
 
@@ -45,7 +44,7 @@ SQLite（`data.db`）：`articles` / `jobs` / `job_events` / `feedback` / `douyi
 
 ## skills 规则
 
-产品 prompt 引用 `videoforge/skills/`（仓库内快照），**不引用** `C:/Users/木木/.claude/skills/`（那是交互会话的个人安装位，经 junction 指向 `F:\Projects\claude-skills` 源码库）。改方法论：先改 `claude-skills` 源码库，确认后同步快照进本仓库并提交，两边都要生效。个人定稿参数（语速 1.12、音色 GongheJiucun02、字幕/头像布局等）以 `skills/article2video/references/DEFAULTS.md` 为准，server 默认值不得与其漂移。
+产品 prompt 引用 `videoforge/skills/`（仓库内快照），**不引用** `C:/Users/木木/.Codex/skills/`（那是交互会话的个人安装位，经 junction 指向 `F:\Projects\Codex-skills` 源码库）。改方法论：先改 `Codex-skills` 源码库，确认后同步快照进本仓库并提交，两边都要生效。个人定稿参数（语速 1.12、音色 GongheJiucun02、字幕/头像布局等）以 `skills/article2video/references/DEFAULTS.md` 为准，server 默认值不得与其漂移。
 
 ## 修改纪律
 
@@ -61,4 +60,4 @@ SQLite（`data.db`）：`articles` / `jobs` / `job_events` / `feedback` / `douyi
 
 ## 数据与红线
 
-`settings.local.json`（应用密钥，注意与 `.claude/settings.local.json` 是两个无关文件）、`data.db`、`workspaces/`、`output/`、`*.log` 均不进 Git。API key 只走环境变量或 settings.local.json，永不写入文档/代码/对话。TikHub 请求计费，重复提取先查历史。**严禁重新克隆声音**（GongheJiucun02 已付费定稿）。
+`settings.local.json`（应用密钥，注意与 `.Codex/settings.local.json` 是两个无关文件）、`data.db`、`workspaces/`、`output/`、`*.log` 均不进 Git。API key 只走环境变量或 settings.local.json，永不写入文档/代码/对话。TikHub 请求计费，重复提取先查历史。**严禁重新克隆声音**（GongheJiucun02 已付费定稿）。

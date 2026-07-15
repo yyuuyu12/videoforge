@@ -71,6 +71,10 @@ $env:HEYGEM_DIR='F:\other\ZHhinengti\aigc-human\python-modules\hdModule'
 7. 验收逐页画面，必要时使用右侧对话微调。
 8. 检查配音字幕、数字人章节预览与完整合成预览。
 
+## 静态预览
+
+作品预览地址固定为 `http://127.0.0.1:5401/preview/<作品ID>/`，不再为产品预览启动独立端口或 Node 进程。首次打开或画面变更后会自动构建；构建错误会显示在预览页并记录为 `preview_build` 事件。共享依赖由 `workspaces/package.json` 锁定，根目录 `npm install` 会自动安装到 `workspaces/node_modules/`。需要排障时，可在本地 `config.json` 设定 `"previewMode": "dev"` 回退旧 Vite 预览路径。
+
 ## 6. 常见故障
 
 - `article text too thin`：提取内容不足 200 字；长视频应检查原声时长和 ASR 完整性。

@@ -1,5 +1,15 @@
 # VideoForge 项目记忆
 
+## 2026-07-15 架构与重做边界更新
+
+- ARCHITECTURE.md 已从“未来三面架构规划”重写为当前运行架构；未来云控制面、跨设备和远程算力继续只放 PRODUCT-PLAN.md，不能写成现有依赖。
+- 当前生产拓扑只有 Dashboard/Express 的 5401 主服务；作品预览统一走 /preview/:id/ 静态链。5300–5399 只保留给 previewMode=dev 的方法论开发或紧急回退，不再是每个作品的默认预览端口。
+- 作品重做遵循最小下游原则：只重新导出从 render 开始；更换数字人从 avatar_gen 开始；更换配音从 audio_synth 开始；重建 PPT 从 scaffold 开始。仍有效的上游产物必须复用。
+- “仅重新导出成片”不得调用 MiniMax、HeyGem 或重新接线数字人，只重新采帧、混音、覆盖 output.mp4 并更新封面；覆盖前必须二次确认。
+- 数字人不是渲染时临时贴层。它在 avatar_gen 阶段生成口型、章节切片并接入演示，gate_avatar 验收后成为可复用的 PPT 组成部分。只有更换数字人、配音、字幕结构或重建 PPT 时才重新经过相关下游阶段。
+- 数字人和字幕基础接线优先由确定性代码完成；Agent 负责语义创作和局部修改。媒体文件存在不代表接线成功，进入验收门前仍需 typecheck、静态构建和浏览器预览。
+- Workbench 导出区现在明确展示“复用 / 重做 / 下一步”，完成作品的按钮为“仅重新导出成片”，并使用确认对话框说明覆盖范围。
+
 ## 2026-07-14 配置体检整理
 
 - 统一文档入口为 `CLAUDE.md`（并入原 CURRENT-ARCHITECTURE.md、docs/PROJECT-STATUS.md、docs/README.md，三者已删除）。
@@ -11,7 +21,7 @@
 - 渲染器启动整片播放必须点击 `.auto-gate` 遮罩，不能按 Space——未打 suppressSpace 补丁的旧 scaffold 双监听会跳过第 0 步（实测丢开场第一段，18/19）。scaffold 模板已打补丁（新项目免疫）。
 - 订阅模式生成引擎已迁 Claude Agent SDK（`@anthropic-ai/claude-agent-sdk`，permissionMode=bypassPermissions + settingSources=[]）：无信任对话框 hack、真实 usage/费用上报、个人全局配置不再漏进产品 prompt；`claude -p` 降级为 SDK 不可用时的兜底（仅兜底路径保留 ensureWorkspaceTrusted）。烟测实证：订阅登录直接可用，Write 工具落盘成功。
 - `output/`、运行日志、SQLite 数据库和 `workspaces/` 均视为本地运行态，不提交 Git。
-- 判断当前实现优先参考 `CLAUDE.md`；`ARCHITECTURE.md` 主要保留未来规划和历史决策。
+- 判断当前系统结构与模块边界优先参考 `ARCHITECTURE.md`；`CLAUDE.md` 保留项目入口、当前实现摘要与开发约定；未来规划以 `PRODUCT-PLAN.md` 为准。
 
 该文件保存长期有效的工程决策，不保存密钥、个人素材或临时任务状态。
 
@@ -38,19 +48,26 @@
 
 - `5401` VideoForge 生产控制台/API。
 - `5400` Dashboard 开发服务器。
-- `5300-5399` 每个作品的预览服务器。
+- `5300-5399` 仅供 `previewMode=dev` 方法论开发或紧急回退；产品默认预览不占这些端口。
 - `8765` Whisper ASR。
 - `7861` HeyGem。
 
 ## 当前边界
 
 - 服务端一键成片已实现（2026-07-14，`server/src/render.js`）：render 阶段/导出面板可直接产出 `output.mp4`；手动录屏降级为渲染失败时的兜底。
-- 数字人全片已可用，但 10 秒分段、乒乓源循环、边界交叉相关对齐仍需继续实现和专项验证。
-- `ARCHITECTURE.md` 包含未来云控制面和跨设备规划，不能当作当前运行状态。
+- 数字人全片已可用，已有音频合并、HeyGem 口型、章节切片、接线与逐章预览；媒体生成与接线 checkpoint 仍需细化，避免接线重试时重复调用昂贵的 HeyGem。
+- `ARCHITECTURE.md` 现在只描述当前运行架构；未来云控制面和跨设备规划以 `PRODUCT-PLAN.md` 为准。
+
+## 2026-07-14 预览静态化
+
+- 产品预览、封面截图和服务端渲染统一使用 Express 的 `/preview/:id/` 静态链：先服务 `presentation/dist/`，媒体再回退 `presentation/public/`，不再自动启动 per-job Vite 进程。
+- `server/src/preview.js` 对 `src/`、`public/` 和构建配置计算元数据指纹；命中 `dist/.build-fingerprint` 时跳过构建，章节生成成功后先构建再进入人工验收。
+- 新作品依赖由提交的 `workspaces/package.json` 锁定并安装到 `workspaces/node_modules/`；各作品不再执行 `npm install`。旧作品如有自己的依赖则保持优先解析。
+- 过渡期开关为 `config.previewMode: "static" | "dev"`，默认 `static`；`devServers.js` 仍可用于方法论开发与紧急回退，观察稳定性后再删除自动回退路径。
 
 ## 修改纪律
 
-- 变更流水线时同步更新 `CLAUDE.md`。
+- 变更流水线或模块边界时同步更新 `ARCHITECTURE.md`、`CLAUDE.md`，并把长期决策写入本文件。
 - 变更服务路径或端口时同步更新 `OPERATIONS.md`。
 - 新增密钥字段必须加入后端打码与 `.gitignore` 检查。
 - 推送前运行 `npm run build`、Node 语法检查和敏感信息扫描。

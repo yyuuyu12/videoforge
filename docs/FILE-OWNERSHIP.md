@@ -14,6 +14,10 @@
 | `output/`、`dist/` | 构建/导出产物 | 否 | 可随时重新生成 |
 | `*.log`、`*.tsbuildinfo` | 临时诊断文件 | 否 | 出问题时单独归档或提供 |
 
+## 共享预览依赖
+
+`workspaces/` 默认仍是运行态目录；唯一提交例外是 `workspaces/package.json` 与 `workspaces/package-lock.json`，它们锁定所有新作品共用的 React/Vite/TypeScript 运行时。`workspaces/node_modules/`、每个作品的 `presentation/dist/`、媒体和其他运行产物均不提交。
+
 ## 命名建议
 
 - 稳定文档使用大写英文文件名，内容可使用中文。
