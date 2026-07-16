@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { createRequire } from "node:module";
-import { extname, join, relative, resolve } from "node:path";
+import { dirname, extname, join, relative, resolve } from "node:path";
 import { config } from "./config.js";
 import { getJob, logEvent } from "./db.js";
 import { devServerStatus, startDevServer, stopDevServer } from "./devServers.js";
@@ -48,19 +48,62 @@ function runNode(script, args, cwd) {
   return new Promise((resolve) => {
     const child = spawn(process.execPath, [script, ...args], { cwd, shell: false });
     let output = "";
+    let settled = false;
     const append = (chunk) => { output = `${output}${chunk}`.slice(-30000); };
+    const finish = (result) => {
+      if (settled) return;
+      settled = true;
+      resolve(result);
+    };
     child.stdout.on("data", append);
     child.stderr.on("data", append);
-    child.on("error", (error) => resolve({ ok: false, output: `${output}\n${error.message}` }));
-    child.on("close", (code) => resolve({ ok: code === 0, output }));
+    child.on("error", (error) => finish({ ok: false, output: `${output}\n无法启动子进程：${error.message}`.trim() }));
+    child.on("close", (code, signal) => {
+      const detail = code === 0
+        ? output
+        : output || `子进程异常退出（退出码：${code ?? "无"}，终止信号：${signal ?? "无"}）`;
+      finish({ ok: code === 0, output: detail });
+    });
   });
 }
 
 function runtimeScripts(presDir) {
   const require = createRequire(join(presDir, "package.json"));
   const tsc = require.resolve("typescript/bin/tsc");
+  const typescript = require("typescript");
   const vitePackage = require.resolve("vite/package.json");
-  return { tsc, vite: join(vitePackage, "..", "bin", "vite.js") };
+  return { tsc, typescript, vite: join(vitePackage, "..", "bin", "vite.js") };
+}
+
+function checkTsConfig(ts, configPath) {
+  const loaded = ts.readConfigFile(configPath, ts.sys.readFile);
+  if (loaded.error) return [loaded.error];
+  const parsed = ts.parseJsonConfigFileContent(
+    loaded.config,
+    ts.sys,
+    dirname(configPath),
+    { noEmit: true },
+    configPath,
+  );
+  if (parsed.errors.length) return parsed.errors;
+  const program = ts.createProgram({
+    rootNames: parsed.fileNames,
+    options: parsed.options,
+    projectReferences: parsed.projectReferences,
+  });
+  return ts.getPreEmitDiagnostics(program);
+}
+
+function checkPresentationTypes(ts, presDir) {
+  const diagnostics = ["tsconfig.app.json", "tsconfig.node.json"]
+    .flatMap((name) => checkTsConfig(ts, join(presDir, name)));
+  if (!diagnostics.length) return { ok: true, output: "" };
+  const output = ts.formatDiagnostics(diagnostics, {
+    getCanonicalFileName: (fileName) => fileName,
+    getCurrentDirectory: () => presDir,
+    getNewLine: () => "\n",
+  });
+  return { ok: false, output };
 }
 
 async function performBuild(job, fingerprint) {
@@ -123,8 +166,13 @@ export async function typecheckPresentation(presDir, jobId, stage) {
   } catch (error) {
     return { ok: false, output: "", note: `预览运行组件尚未安装：${error.message}` };
   }
-  const result = await runNode(scripts.tsc, ["--noEmit"], presDir);
-  logEvent(jobId, stage, `$ shared tsc --noEmit\n${result.output.slice(-1500)}`, result.ok ? "info" : "error");
+  let result;
+  try {
+    result = checkPresentationTypes(scripts.typescript, presDir);
+  } catch (error) {
+    result = { ok: false, output: `TypeScript 检查器运行异常：${error.message}` };
+  }
+  logEvent(jobId, stage, `$ TypeScript 项目检查\n${result.output.slice(-1500)}`, result.ok ? "info" : "error");
   return { ...result, note: result.ok ? "" : `TypeScript 检查失败：${result.output.slice(-1200)}` };
 }
 

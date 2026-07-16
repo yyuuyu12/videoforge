@@ -328,6 +328,19 @@ function ensureNativeScaffold(skill, target, theme) {
   mkdirSync(join(target, "src", "styles"), { recursive: true });
   mkdirSync(join(target, "public"), { recursive: true });
   copyFileSync(tokens, join(target, "src", "styles", "tokens.css"));
+  const chapterRegistry = join(target, "src", "registry", "chapters.ts");
+  if (existsSync(chapterRegistry)) {
+    const registrySource = readFileSync(chapterRegistry, "utf8");
+    if (registrySource.includes("../chapters/01-example/")) {
+      writeFileSync(chapterRegistry, [
+        'import type { ChapterDef } from "./types";',
+        "",
+        "// Real chapters are registered incrementally during chapter generation.",
+        "export const CHAPTERS: ChapterDef[] = [];",
+        "",
+      ].join("\n"));
+    }
+  }
   rmSync(join(target, "src", "chapters", "01-example"), { recursive: true, force: true });
   rmSync(join(target, ".videoforge-chapter-progress.json"), { force: true });
   rmSync(join(target, "dist", ".build-fingerprint"), { force: true });
