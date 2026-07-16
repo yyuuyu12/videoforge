@@ -471,6 +471,7 @@ const runners = {
       `- 每章独立文件夹 + 独立 CSS 前缀 + narrations.ts（长度 = step 数）`,
       `- 全部注册进 src/registry/chapters.ts，每次结构变化 bump useStepper.ts 的 STORAGE_KEY`,
       `- 颜色/字体只用主题 token；严格遵守上面的作品级字号与排版密度预设`,
+      `- 首次生成必须满足 CHAPTER-CRAFT 的“首次生成质量契约”：先拆分超预算内容，不得依赖生成后的截图修复来补救拥挤、溢出、短标题三行或安全区冲突`,
       `- kicker 用 .title-label 一类的大标题样式，不要小号说明文字`,
       `- 每章完成后自己跑完工自检并修复 FAIL 项；全项目 npx tsc --noEmit 必须 0 错误`,
       `- 可以并行使用子任务加速，但最终交付要整体一致`,
@@ -784,6 +785,14 @@ export async function runFeedback(job, { chapter, message, phase, attachmentPath
           : phase === "逐页生成"
             ? `本次是全局画面修改：检查 presentation/src/chapters/ 下全部章节，只修改与用户要求直接相关的页面；每个受影响章节都要完成类型检查。`
             : `当前查看“${phase || "画面"}”：只允许修改 presentation 内与反馈直接相关的文件，改动范围尽量小。`;
+  // 给 Agent 喂最近一次质量审计证据（QUALITY-ARCHITECTURE §9 R3）：盲修变有据可依
+  try {
+    const audit = JSON.parse(readFileSync(join(job.workspace, "presentation", "public", "quality-audit.json"), "utf8"));
+    const failing = (audit.steps || []).filter((s) => !s.pass).slice(0, 8)
+      .map((s) => `第${s.chapter + 1}章第${s.step + 1}屏 ${s.score}分(碰撞${s.visual?.collisions || 0}/溢出${s.overflowCount || 0})`);
+    scopeLine += `\n最近一次质量审计：整体 ${audit.score}/100${failing.length ? `；低分屏：${failing.join("、")}` : "，全部通过"}。你的修改不得让这些指标变差。`;
+  } catch {}
+
   if (phase === "配音字幕") {
     scopeLine = `当前环节只允许修改 narration、字幕和音频相关文件，不得修改 presentation 的布局、主题或章节正文。`;
   } else if (phase === "数字人") {

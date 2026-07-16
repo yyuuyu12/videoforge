@@ -16,6 +16,8 @@ import { cloneVoice, synthesize, testKey } from "./minimax.js";
 import { health as heygemHealth } from "./heygem.js";
 import { extractDouyin } from "./douyin.js";
 import { searchTopics } from "./search.js";
+import { classifyFeedback } from "./feedbackRouter.js";
+import { ledgerStats, recordQualityEntry } from "./qualityLedger.js";
 import { retryExtraction } from "./workers/extractions.js";
 import { createSourceDocument } from "./sourceDocument.js";
 
@@ -186,6 +188,11 @@ function usageCategory(service, operation = "") {
   if (/subtitle_cues/.test(operation)) return "visual";
   return "other";
 }
+
+api.get("/quality/ledger", (req, res) => {
+  const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
+  res.json(ledgerStats(days));
+});
 
 api.get("/usage", (req, res) => {
   const days = Math.max(1, Math.min(365, Number(req.query.days) || 30));
@@ -1015,6 +1022,20 @@ api.post("/jobs/:id/feedback", async (req, res) => {
     if (!chapterGeneration(job).chapters.some((item) => item.key === chapterKey)) {
       return res.status(404).json({ error: "没有找到要修改的章节" });
     }
+  }
+
+  // R1 意图路由：同步/全局类问题不进 Agent（QUALITY-ARCHITECTURE §9）
+  const routed = classifyFeedback(message, phase);
+  if (routed.route !== "agent") {
+    const guidance = routed.route === "pipeline"
+      ? `已识别为媒体管线问题：${routed.reason}。\n正确修法是重跑「${routed.label}」——在对应环节点「重新生成」（内部阶段：${routed.stage}），下游会按级联规则自动重做，无需逐页修改代码。`
+      : `${routed.reason}。请回到「选择风格」环节更换主题后重新生成画面，系统会保留原文与稿件。`;
+    const routedRow = db
+      .prepare("INSERT INTO feedback (job_id, chapter, phase, message, status, progress, progress_message, result) VALUES (?, ?, ?, ?, 'done', 100, ?, ?)")
+      .run(job.id, chapter ?? null, phase, message, "已识别问题归属，未调用模型", guidance);
+    recordQualityEntry({ kind: "feedback-routed", jobId: job.id, route: routed.route, stage: routed.stage ?? null, phase });
+    logEvent(job.id, "feedback", `意图路由：${routed.route}${routed.stage ? ` -> ${routed.stage}` : ""}（未调用模型）`);
+    return res.json({ feedbackId: routedRow.lastInsertRowid, routed: routed.route, stage: routed.stage ?? null });
   }
 
   const f = db

@@ -3,7 +3,8 @@ import { join } from "node:path";
 import { db, getJob, logEvent, updateJob } from "../db.js";
 import { nextStage, repairChapterQuality, runStage, stageDef } from "../stages.js";
 import { buildPresentation } from "../preview.js";
-import { auditPreviewQuality } from "../render.js";
+import { auditPreviewQuality, inspectPreviewQuality } from "../render.js";
+import { defectSummary, recordQualityEntry } from "../qualityLedger.js";
 
 /**
  * DB-backed job runner. Picks queued jobs, runs their current stage,
@@ -52,20 +53,25 @@ async function advance(jobId) {
       if (job.stage === "chapter_gen") {
         try {
           await buildPresentation(getJob(jobId));
-          let audit = await auditPreviewQuality(getJob(jobId));
+          let audit = await inspectPreviewQuality(getJob(jobId));
+          if (!audit.pass) audit = await auditPreviewQuality(getJob(jobId));
+          recordQualityEntry({ kind: "audit", jobId, phase: "first", score: audit.score, pass: audit.pass, checkedSteps: audit.checkedSteps, defects: defectSummary(audit) });
           for (let attempt = 1; !audit.pass && attempt <= 3; attempt += 1) {
             const worst = audit.worstStep;
             logEvent(jobId, "quality", `自动画面验收 ${audit.score}/100，开始第 ${attempt}/3 次修复${worst ? `（第 ${worst.chapter + 1} 章第 ${worst.step + 1} 屏）` : ""}`, "error");
             const repaired = await repairChapterQuality(getJob(jobId), audit);
             if (!repaired.ok) throw new Error(`第 ${attempt} 次自动修复失败：${repaired.note || "模型未完成修复"}`);
             await buildPresentation(getJob(jobId));
-            audit = await auditPreviewQuality(getJob(jobId));
+            const before = audit.score;
+            audit = await inspectPreviewQuality(getJob(jobId));
+            if (!audit.pass) audit = await auditPreviewQuality(getJob(jobId));
+            recordQualityEntry({ kind: "repair-round", jobId, round: attempt, scoreBefore: before, scoreAfter: audit.score, pass: audit.pass, defects: defectSummary(audit) });
           }
           if (!audit.pass) {
             const worst = audit.worstStep;
             throw new Error(`逐屏画面验收仅 ${audit.score}/100，低于 90 分${worst ? `；最低分为第 ${worst.chapter + 1} 章第 ${worst.step + 1} 屏` : ""}。已保留最低分截图，未进入人工验收。`);
           }
-          logEvent(jobId, "quality", `逐屏画面验收通过：${audit.score}/100，共检查 ${audit.checkedSteps} 屏`);
+          logEvent(jobId, "quality", `结构质量门禁通过：${audit.score}/100，共检查 ${audit.checkedSteps} 屏${audit.screenshotsCaptured ? `，留存 ${audit.screenshotsCaptured} 张问题复核截图` : "，无需截图修复"}`);
         } catch (error) {
           result = { ok: false, note: `画面构建未通过，尚未进入验收：${error.message}` };
           updateJob(jobId, { status: "failed", error: result.note });
