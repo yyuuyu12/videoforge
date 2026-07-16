@@ -394,13 +394,23 @@ export async function renderJob(job) {
     progress(job.id, 72, `合成视频帧（${frames.length} 帧）`);
 
     // 变长帧 concat 清单：duration = 相邻帧时间差，末帧顿 1s。
+    // 时间戳相同/乱序的帧直接丢弃（同一时刻的画面重复），绝不垫最小时长——
+    // 垫出来的假时长会累计拉长视频时间轴，而配音按真实挂钟摆放，
+    // 结果就是字幕/口型越播越滞后且漂移量随采帧负载波动（时快时慢）。
     const t0 = frames[0].ts;
-    const lines = [];
-    for (let i = 0; i < frames.length; i += 1) {
-      const dur = i + 1 < frames.length ? Math.max(0.008, frames[i + 1].ts - frames[i].ts) : 1.0;
-      lines.push(`file '${relative(tmpDir, frames[i].file).replace(/\\/g, "/")}'`, `duration ${dur.toFixed(4)}`);
+    const timeline = [];
+    for (const frame of frames) {
+      if (timeline.length && frame.ts <= timeline[timeline.length - 1].ts) continue;
+      timeline.push(frame);
     }
-    lines.push(`file '${relative(tmpDir, frames[frames.length - 1].file).replace(/\\/g, "/")}'`);
+    const droppedFrames = frames.length - timeline.length;
+    if (droppedFrames) logEvent(job.id, "render", `丢弃 ${droppedFrames} 个重复/乱序时间戳帧，保持时间轴与真实挂钟一致`);
+    const lines = [];
+    for (let i = 0; i < timeline.length; i += 1) {
+      const dur = i + 1 < timeline.length ? timeline[i + 1].ts - timeline[i].ts : 1.0;
+      lines.push(`file '${relative(tmpDir, timeline[i].file).replace(/\\/g, "/")}'`, `duration ${dur.toFixed(4)}`);
+    }
+    lines.push(`file '${relative(tmpDir, timeline[timeline.length - 1].file).replace(/\\/g, "/")}'`);
     const listFile = join(tmpDir, "frames.txt");
     writeFileSync(listFile, lines.join("\n"));
 
@@ -449,6 +459,8 @@ export async function renderJob(job) {
     writeFileSync(join(job.workspace, "render-meta.json"), JSON.stringify({
       renderedAt: new Date().toISOString(),
       frames: frames.length,
+      droppedFrames,
+      timelineSpanSec: Math.round((timeline[timeline.length - 1].ts - t0) * 10) / 10,
       segmentsPlaced: placements.length,
       segmentsExpected: segments.length,
       durationSec: Math.round(finalDur * 10) / 10,

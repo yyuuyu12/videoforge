@@ -6,6 +6,7 @@ import { buildPresentation } from "../preview.js";
 import { auditPreviewQuality, inspectPreviewQuality } from "../render.js";
 import { defectSummary, recordQualityEntry } from "../qualityLedger.js";
 import { lintChapters, lintDefectSummary } from "../chapterLint.js";
+import { preflightWarnings } from "../preflight.js";
 
 /**
  * DB-backed job runner. Picks queued jobs, runs their current stage,
@@ -34,6 +35,20 @@ async function advance(jobId) {
         updateJob(jobId, { status: job.stage === "done" ? "done" : "waiting_approval" });
         logEvent(jobId, job.stage, def.id === "done" ? "全部完成" : `到达审批门：${def.label}`);
         break;
+      }
+
+      // 开工预检：第一个工作阶段启动时给出依赖服务预警（不阻断——服务可能
+      // 中途才启动；硬检查仍在各消费阶段自检）。
+      if (job.stage === "script_outline") {
+        try {
+          let meta = {};
+          try { meta = JSON.parse(job.meta || "{}"); } catch {}
+          for (const warning of await preflightWarnings(meta)) {
+            logEvent(jobId, "preflight", warning, "warning");
+          }
+        } catch (err) {
+          logEvent(jobId, "preflight", `服务预检未能运行：${err.message}`, "warning");
+        }
       }
 
       logEvent(jobId, job.stage, `stage start: ${def.label}`);

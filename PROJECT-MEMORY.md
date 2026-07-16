@@ -1,5 +1,12 @@
 # VideoForge 项目记忆
 
+## 2026-07-16 字幕对齐三层排查结论 + 渲染时间轴铁律
+
+- 字幕对齐要分三层看：①数据层（words.json vs mp3）实测偏差恒定 -0.04s；②预览播放层（rAF 采样）实测切换偏差 4-26ms（一个 rAF 帧内）；③**成片渲染层才是漂移源**——帧清单曾对相同/乱序时间戳垫 8ms 假时长，视频时间轴被累计拉长而配音按真实挂钟摆放，负载越高垫得越多（"时快时慢"）。修复：重复/乱序时间戳帧直接丢弃，时间轴与挂钟严格一致；render-meta.json 记 droppedFrames/timelineSpanSec 供核对。
+- **铁律：判断音画不同步先问用户看的是预览还是成片、哪个作品**——旧成片带旧数据，重渲即修，别在新代码里找不存在的 bug。
+- 覆盖 workspace 组件前必须核对各作品的组件接口：旧脚手架有 chapterId/step（章节切片版，job-14）与 videoTimeOffset（offset 版，job-4）两种历史接口，盲目用模板版覆盖会 TS 报错、渲染失败（2026-07-16 实翻车一次，靠 9/9 tsc 全查恢复）。
+- 服务预检落地：server/src/preflight.js（servicesStatus + preflightWarnings），GET /api/services/status；流水线 script_outline 开工时记 warning 事件（不阻断，硬检查仍在消费阶段）。默认数字人：settings.avatar.defaultFilename（选择即记默认），avatar_media 无素材时自动带出。
+
 ## 2026-07-16 数字人断续的真因与播放架构定稿
 
 - **HeyGem 推理内部自带乒乓延长**（正放→倒放→正放），无需也不要在上传前自行拼接素材。job-20 证据：54.5s 素材铺 165.7s 音频，输出在 54.5s/109s 两个折返点抽帧无跳切、t=30 与原素材姿势 1:1 对齐、无重复帧。底层推理是编译产物（`hdModule/main.cp310-win_amd64.pyd`），不可修改；可改的是包装层 `heygem_server_v2.py`（XiaMuagent/desktop_client）与我们自己的媒体/播放层。

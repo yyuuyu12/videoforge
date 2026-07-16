@@ -14,6 +14,7 @@ import { loadSettings, publicSettings, saveSettings } from "./settings.js";
 import { testLlmConnection } from "./providers.js";
 import { cloneVoice, synthesize, testKey } from "./minimax.js";
 import { health as heygemHealth } from "./heygem.js";
+import { servicesStatus } from "./preflight.js";
 import { extractDouyin } from "./douyin.js";
 import { searchTopics } from "./search.js";
 import { classifyFeedback } from "./feedbackRouter.js";
@@ -332,7 +333,7 @@ api.put("/settings", (req, res) => {
   // Accept a partial patch; empty-string keys mean "keep existing" so the
   // dashboard can submit the form without re-entering secrets every time.
   const patch = req.body ?? {};
-  for (const section of ["llm", "minimax", "heygem", "asr"]) {
+  for (const section of ["llm", "minimax", "heygem", "asr", "avatar"]) {
     for (const secret of ["apiKey", "token"]) {
       if (patch[section] && patch[section][secret] === "") delete patch[section][secret];
     }
@@ -411,6 +412,15 @@ api.get("/heygem/health", async (_req, res) => {
   res.json(await heygemHealth());
 });
 
+// 统一依赖服务状态：生成引擎 / 配音 / 数字人 / ASR（工作台与新建页预检用）
+api.get("/services/status", async (_req, res) => {
+  try {
+    res.json(await servicesStatus());
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
+
 // ---- reusable avatar assets -------------------------------------------------
 
 const avatarLibraryDir = join(config.workspacesRoot, "_assets", "avatars");
@@ -470,7 +480,9 @@ api.post("/jobs/:id/avatar/select", (req, res) => {
     pendingRegeneration: true,
   };
   updateJob(job.id, { meta: JSON.stringify(meta) });
-  logEvent(job.id, "avatar_media", `已切换数字人素材：${asset.name}；等待重新生成口型`);
+  // 最近一次选择即默认：下个作品启用数字人时自动带出，无需重复选
+  saveSettings({ avatar: { defaultFilename: asset.filename } });
+  logEvent(job.id, "avatar_media", `已切换数字人素材：${asset.name}；等待重新生成口型（已记为默认素材）`);
   res.json({ ok: true, asset: { id: asset.id, name: asset.name }, pendingRegeneration: true });
 });
 

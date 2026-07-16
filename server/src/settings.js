@@ -48,6 +48,11 @@ const DEFAULTS = {
   search: {
     directions: "AI 编程工具, AI 行业动态", // 联网搜索选题的默认方向词
   },
+  avatar: {
+    // 默认数字人素材（素材库文件名）。选择素材时自动记为默认，
+    // 新作品启用数字人而未选素材时由 avatar_media 自动带出。
+    defaultFilename: "",
+  },
 };
 
 function deepMerge(base, extra) {

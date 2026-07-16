@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { copyFileSync, createReadStream, existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
+import { basename, join } from "node:path";
 import { config, ROOT } from "./config.js";
 import { db, logEvent, recordUsage, updateJob } from "./db.js";
 import { runAgent } from "./agentRunner.js";
@@ -587,7 +587,22 @@ const runners = {
     try { meta = JSON.parse(job.meta || "{}"); } catch {}
     if (!meta.avatar?.enabled) return { ok: true, note: "本作品未启用数字人" };
     avatarProgress(job.id, 2, "检查数字人服务和素材");
-    if (!meta.avatar.source) return { ok: false, note: "请先从素材库选择一段本人出镜视频" };
+    if (!meta.avatar.source) {
+      // 未选素材时自动带出默认数字人（最近一次选择即默认）
+      const defaultFilename = loadSettings().avatar?.defaultFilename;
+      const libraryFile = defaultFilename ? join(config.workspacesRoot, "_assets", "avatars", basename(defaultFilename)) : "";
+      if (libraryFile && existsSync(libraryFile)) {
+        const dir = join(job.workspace, "assets");
+        mkdirSync(dir, { recursive: true });
+        const saved = `presenter.${defaultFilename.toLowerCase().endsWith(".mov") ? "mov" : "mp4"}`;
+        copyFileSync(libraryFile, join(dir, saved));
+        meta.avatar = { ...meta.avatar, source: `assets/${saved}`, filename: defaultFilename };
+        updateJob(job.id, { meta: JSON.stringify(meta) });
+        logEvent(job.id, "avatar_media", `已自动使用默认数字人素材：${defaultFilename}`);
+      } else {
+        return { ok: false, note: "请先从素材库选择一段本人出镜视频（选择一次后会自动记为默认）" };
+      }
+    }
     const source = join(job.workspace, meta.avatar.source);
     if (!existsSync(source)) return { ok: false, note: "所选数字人视频不存在，请重新从素材库选择" };
     const presDir = join(job.workspace, "presentation");
