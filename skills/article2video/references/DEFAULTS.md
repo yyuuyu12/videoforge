@@ -25,10 +25,12 @@
 |---|---|---|
 | 样式 | **纯黑字（#000），无底框、无背景、无圆角、无入场动画**；白字+黑底条、渐变 scrim 都被两轮否决（"不要模板"） | ai-market-video |
 | 字色安全性 | 纯黑只在浅色主题安全；深色主题（如 midnight-press）要反过来用浅色字 | 推论，开工时按主题定 |
-| 位置 | 底部居中，`left: 60px; right: 460px`（避开右侧头像窗），`bottom: 48px` | ai-market-video |
-| 粒度 | 一次一行，~10 字/行（cue 上限 22 字），逐字时间戳驱动 | 两项目通用 |
+| 位置 | 底部**相对整个画面居中**，`left: 60px; right: 60px`，`bottom: 58px`——不为头像窗偏移（旧值 right:460px 造成整体偏左，2026-07-16 用户否决） | VideoForge 定稿 2026-07-16 |
+| 粒度 | 一次一行，正文目标 8 字/硬上限 10 字（纯拉丁词/短语豁免），逐字时间戳驱动 | VideoForge 定稿 2026-07-16 |
+| 断句 | **气口必断**：。！？…；：，遇到即切（顿号软断，≥8 字才切）；**词完整**：Intl.Segmenter 中文分词，cue 边界只落词边界（"高兴"绝不拆两页） | VideoForge 定稿 2026-07-16 |
+| 尾标点 | cue 结尾的 。，、；：… 一律剥离不显示（分页展示后分隔标点无意义）；？！保留（承载语气，不占字数预算） | VideoForge 定稿 2026-07-16 |
 | 同步机制 | rAF 轮询 `audio.currentTime`，不用 timeupdate；只依赖每段起始时间 | 两项目通用 |
-| 分组算法 | 见 video-avatar-subtitles/scripts/gen-subtitle-cues.mjs（含两个已修 bug：MiniMax 返回是"按句分段+嵌套 timestamped_words"结构，必须先展开；句尾标点孤行要 1-词 lookahead 吸收） | ai-market-video 修正版 |
+| 分组算法 | 见 video-avatar-subtitles/scripts/gen-subtitle-cues.mjs（已含：MiniMax 按句分段+嵌套结构展开；连续重复拉丁词条去重；Intl.Segmenter 词级归组） | VideoForge 修正版 2026-07-16 |
 
 ## 3. 对口型头像
 

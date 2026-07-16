@@ -34,6 +34,15 @@ test("超长 cue 被判定为 error（job-13/14 回归缺陷）", () => {
   assert.ok(cueEvidence(result)[0].includes(`${CUE_HARD_LIMIT} 字硬上限`));
 });
 
+test("cue 尾部分隔标点判定为 error（？！豁免）", () => {
+  const bad = makeRegistry({ hook: [[{ text: "先看这三件事，", startMs: 40 }]] });
+  const badResult = validateSubtitleCues(bad);
+  assert.equal(badResult.pass, false);
+  assert.equal(badResult.findings[0].rule, "cue-trailing-punct");
+  const ok = makeRegistry({ hook: [[{ text: "越亮越安全吗？", startMs: 40 }]] });
+  assert.equal(validateSubtitleCues(ok).pass, true);
+});
+
 test("不可拆的纯拉丁整词豁免上限（如 Transformer）", () => {
   const presDir = makeRegistry({
     hook: [[{ text: "Transformer", startMs: 40 }, { text: "改变了一切", startMs: 900 }]],

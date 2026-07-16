@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 // Reads public/audio/<chapter>/<step>.words.json (real MiniMax word-level
 // timestamps) and produces src/registry/subtitleCues.ts — a per-step array
-// of {text, startMs} cues, chunked with the same rules as
-// video-avatar-subtitles/references/SUBTITLE-SYNC.md (never split a token,
-// prefer breaking on real punctuation, drop dangling soft-break commas).
+// of {text, startMs} cues.
+//
+// 电影字幕契约（2026-07-16 定稿，用户拍板）：
+//   1. 气口必断：。！？…；：，都是句间气口，遇到即切 cue（顿号、是
+//      软断点，只在长度需要时切）——观感是"一句一句展示"。
+//   2. 词完整：用 Intl.Segmenter 中文分词，cue 边界只落在词边界上，
+//      绝不出现"高"留上页、"兴"落下页（MiniMax 逐字返回，没有词信息）。
+//   3. 尾标点隐藏：cue 结尾的 。，、；：… 不显示（两句话已经分页展示，
+//      分隔标点失去意义）；？！保留（承载语气）。
+//   4. 目标 8 字、硬上限 10 字（不可拆的纯拉丁整词豁免）。
 //
 // Steps with no .words.json (missing audio) get an empty cue array — the
 // Subtitle component falls back to full-text display in that case.
@@ -17,100 +24,58 @@ const root = join(__dirname, "..");
 
 const segments = JSON.parse(readFileSync(join(root, "audio-segments.json"), "utf8"));
 
-// ---- chunking primitives (ported from chunk-subtitle.mjs, timestamp-aware) ----
-const SENTENCE_END = /[。！？.!?…]/;
-const SOFT_BREAK = /[，、；,;]/;
-// Keep cues close to the requested mobile short-video rhythm: about ten
-// characters, with a hard single-line ceiling and punctuation-aware breaks.
+// ---- 电影式切分核心 ----------------------------------------------------------
 const TARGET_CHARS = 8;
 const HARD_MAX_CHARS = 10;
-const ABSOLUTE_MAX_CHARS = 10;
-const TOKEN_RUN = /[A-Za-z0-9_./-]+/y;
+// 气口（必断）：句读级停顿。顿号只是列举间隔，作为软断点。
+const HARD_BREAK = /^[。！？…；：，.!?;:,]$/;
+const SOFT_BREAK = /^[、]$/;
+const ANY_PUNCT = /^[。！？…；：，、.!?;:,]$/;
+// cue 尾部剥离的标点（？！不在其中——语气要保留）。
+const TRAILING_STRIP = /[。．.，,、；;：:…\s]+$/;
 
-function tokenize(text) {
-  const atoms = [];
-  let i = 0;
-  while (i < text.length) {
-    TOKEN_RUN.lastIndex = i;
-    const m = TOKEN_RUN.exec(text);
-    if (m && m.index === i) {
-      atoms.push(text.slice(i, i + m[0].length));
-      i += m[0].length;
-    } else {
-      atoms.push(text[i]);
-      i += 1;
-    }
-  }
-  return atoms;
-}
+// 中文按词分组（Node 自带 ICU；latin/数字天然成词，标点单列）。
+const segmenter = new Intl.Segmenter("zh", { granularity: "word" });
 
-function isBreakAtom(atom) {
-  return atom.length === 1 && (SENTENCE_END.test(atom) || SOFT_BREAK.test(atom));
-}
-
-function hasBreakWithin(atoms, fromIndex, maxChars) {
-  let charsSeen = 0;
-  for (let j = fromIndex; j < atoms.length && charsSeen < maxChars; j++) {
-    charsSeen += atoms[j].length;
-    if (isBreakAtom(atoms[j])) return true;
-  }
-  return false;
-}
-
-/**
- * Same control flow as chunkNarration, but atoms carry a startMs (the real
- * timestamp of their first character) so each emitted chunk keeps the
- * startMs of its own first atom.
- */
 function chunkWithTimestamps(atoms) {
   const chunks = [];
   let buf = "";
   let bufStartMs = null;
 
-  const flush = (stripTrailingSoftBreak) => {
-    const stripped = stripTrailingSoftBreak ? buf.replace(/[，、；,;]\s*$/, "") : buf;
-    const out = stripped.trim();
+  const flush = () => {
+    const out = buf.trim().replace(TRAILING_STRIP, "");
     if (out) chunks.push({ text: out, startMs: bufStartMs ?? 0 });
     buf = "";
     bufStartMs = null;
   };
 
-  for (let i = 0; i < atoms.length; i++) {
-    const { text: atom, startMs } = atoms[i];
-
-    if (buf === "" && atom.length === 1 && (SENTENCE_END.test(atom) || SOFT_BREAK.test(atom))) {
-      continue;
+  for (const { text: atom, startMs } of atoms) {
+    const isPunct = ANY_PUNCT.test(atom);
+    if (buf === "" && isPunct) continue; // cue 不以标点开头
+    // 词完整：装不下整个词就先断句（标点不受此限，随后由 flush 剥离）
+    if (buf !== "" && !isPunct && buf.trim().length + atom.length > HARD_MAX_CHARS) {
+      flush();
     }
-    if (buf !== "" && atom.length > 1 && buf.trim().length + atom.length > ABSOLUTE_MAX_CHARS) {
-      flush(false);
-    }
-
     if (buf === "") bufStartMs = startMs;
     buf += atom;
-    const bufLen = buf.trim().length;
-    const isSentenceEnd = atom.length === 1 && SENTENCE_END.test(atom);
-    const isSoftBreak = atom.length === 1 && SOFT_BREAK.test(atom);
-
-    if (isSentenceEnd) {
-      flush(false);
-    } else if (isSoftBreak && bufLen >= TARGET_CHARS) {
-      flush(true);
-    } else if (bufLen >= HARD_MAX_CHARS) {
-      const roomLeft = ABSOLUTE_MAX_CHARS - bufLen;
-      const atomTexts = atoms.map((a) => a.text);
-      const shouldWaitForBreak = roomLeft > 0 && hasBreakWithin(atomTexts, i + 1, roomLeft);
-      if (!shouldWaitForBreak) flush(false);
+    if (HARD_BREAK.test(atom)) {
+      flush(); // 气口必断
+    } else if (SOFT_BREAK.test(atom) && buf.trim().length >= TARGET_CHARS) {
+      flush(); // 顿号：到目标长度才断
     }
   }
-  if (buf.trim()) chunks.push({ text: buf.trim(), startMs: bufStartMs ?? 0 });
+  flush();
   return chunks;
 }
 
 function validateCues(cues, source) {
-  const failures = cues.filter((cue) =>
-    /\n|\r/.test(cue.text)
-    || (cue.text.length > ABSOLUTE_MAX_CHARS && !/^[A-Za-z0-9_./-]+$/.test(cue.text)),
-  );
+  // 上限按正文计：尾部保留的？！是窄字符且承载语气，不占字数预算。
+  const failures = cues.filter((cue) => {
+    const body = cue.text.replace(/[？！?!]+$/, "");
+    return /\n|\r/.test(cue.text)
+      || TRAILING_STRIP.test(cue.text)
+      || ([...body].length > HARD_MAX_CHARS && !/^[A-Za-z0-9_./\- ]+$/.test(cue.text));
+  });
   if (failures.length) {
     throw new Error(`subtitle cue validation failed for ${source}: ${failures.map((cue) => cue.text).join(" | ")}`);
   }
@@ -134,24 +99,17 @@ function cuesForWordsFile(path) {
       words.push({ text: w.word, startMs: w.time_begin });
     }
   }
-  // Expand each (possibly multi-char) word into per-character atoms so the
-  // tokenizer's Latin/digit run-detection still works across word boundaries
-  // (MiniMax sometimes returns a whole English token as one "word" entry,
-  // sometimes splits it — normalizing to per-char here makes both cases
-  // tokenize identically downstream).
+  // 展开为逐字时间轴（MiniMax 中文本来就逐字；latin 偶尔整词返回，
+  // 展开后由分词器重新归组，两种来源产出一致）。
   const chars = [];
   for (const w of words) {
     for (const ch of w.text) chars.push({ ch, startMs: w.startMs });
   }
   const fullText = chars.map((c) => c.ch).join("");
-  const rawAtoms = tokenize(fullText);
-  // Re-walk rawAtoms against chars to attach each atom's startMs (the
-  // timestamp of its first character).
+  // Intl.Segmenter 词级归组：cue 边界只落在词边界，"高兴"永不拆分。
   const atoms = [];
-  let cursor = 0;
-  for (const atomText of rawAtoms) {
-    atoms.push({ text: atomText, startMs: chars[cursor]?.startMs ?? 0 });
-    cursor += atomText.length;
+  for (const seg of segmenter.segment(fullText)) {
+    atoms.push({ text: seg.segment, startMs: chars[seg.index]?.startMs ?? 0 });
   }
   return chunkWithTimestamps(atoms);
 }

@@ -15,7 +15,8 @@ function chunkFallbackText(text: string) {
   const chunks: string[] = [];
   let current = "";
   const flush = () => {
-    const value = current.replace(/[，、；,;]\s*$/, "").trim();
+    // 电影字幕契约：尾部分隔标点（。，、；：…）不显示，？！保留语气
+    const value = current.replace(/[。．.，,、；;：:…\s]+$/, "").trim();
     if (value) chunks.push(value);
     current = "";
   };

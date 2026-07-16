@@ -133,8 +133,10 @@ function subtitleStyle(options) {
     : preset === "outline"
       ? `color: ${color}; text-shadow: -2px -2px 0 ${lightText ? "#111" : "#fff"}, 2px -2px 0 ${lightText ? "#111" : "#fff"}, -2px 2px 0 ${lightText ? "#111" : "#fff"}, 2px 2px 0 ${lightText ? "#111" : "#fff"};`
       : `color: ${color}; text-shadow: ${shadow};`;
-  const right = options.avatar?.enabled ? 460 : 60;
-  return `\n/* VideoForge product preset: generated from jobs.meta. */\n.subtitle {\n  left: 60px;\n  right: ${right}px;\n  ${placement}\n  ${panel}\n}\n`;
+  // 字幕永远相对整个画面居中（用户定稿 2026-07-16）：数字人是右下角
+  // 小窗，10 字单行字幕居中后右缘远够不到它，不需要偏移避让——
+  // 之前 avatar 启用时 right:460px 造成"整体偏左"的观感缺陷。
+  return `\n/* VideoForge product preset: generated from jobs.meta. */\n.subtitle {\n  left: 60px;\n  right: 60px;\n  ${placement}\n  ${panel}\n}\n`;
 }
 
 function applySubtitlePreset(presDir, options) {

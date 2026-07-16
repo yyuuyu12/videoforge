@@ -40,9 +40,15 @@ export function validateSubtitleCues(presDir) {
       }
       let lastStart = -1;
       stepCues.forEach((cue, cueIndex) => {
-        const chars = [...String(cue.text || "")].length;
-        // 纯拉丁/数字整词（如 "Transformer"）不可拆，与切分器规则一致地豁免
-        const unsplittableLatin = /^[A-Za-z0-9_.\/-]+$/.test(String(cue.text || ""));
+        // 上限按正文计：尾部保留的？！是窄字符且承载语气，不占字数预算
+        const chars = [...String(cue.text || "").replace(/[？！?!]+$/, "")].length;
+        // 电影字幕契约：cue 尾部不允许出现分隔标点（。，、；：…），？！保留
+        if (/[。．.，,、；;：:…]$/.test(String(cue.text || ""))) {
+          findings.push({ rule: "cue-trailing-punct", severity: "error", detail: `${where} 第 ${cueIndex + 1} 条以分隔标点结尾（"${String(cue.text).slice(-6)}"）——展示层已分页，尾标点应剥离` });
+        }
+        // 纯拉丁/数字词或短语（如 "Transformer"、"Claude Free"）是窄字符
+        // 且不可按中文规则拆分，与切分器规则一致地豁免
+        const unsplittableLatin = /^[A-Za-z0-9_.\/\- ]+$/.test(String(cue.text || ""));
         if (chars > CUE_HARD_LIMIT && !unsplittableLatin) {
           findings.push({ rule: "cue-too-long", severity: "error", detail: `${where} 第 ${cueIndex + 1} 条 ${chars} 字（"${String(cue.text).slice(0, 14)}…"）超过 ${CUE_HARD_LIMIT} 字硬上限` });
         }

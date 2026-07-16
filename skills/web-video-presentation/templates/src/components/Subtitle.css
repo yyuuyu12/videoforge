@@ -32,7 +32,7 @@
 /* VideoForge product preset: generated from jobs.meta. */
 .subtitle {
   left: 60px;
-  right: 460px;
+  right: 60px; /* 字幕相对整个画面居中（2026-07-16 定稿），不为数字人小窗偏移 */
   bottom: 58px;
   color: #f8fafc; text-shadow: 0 2px 10px rgba(0,0,0,.72);
 }
