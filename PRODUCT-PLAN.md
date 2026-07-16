@@ -202,9 +202,9 @@ v1 是录屏指引（最可靠）。v2 上服务端自动成片：Playwright 无
 
 **基础设施事实核对**（用户印象 vs 实际）：域名 yyagent.top **已经绑定并在服务**（DNS → 阿里云上海 106.14.151.37，nginx 已配 heygem/asr/videomix 子域 → frps 隧道，2027-01-23 到期）。真正缺的不是"绑域名"，而是下面三件：
 
-1. **frpc 常驻**（家里侧）：隧道配置在但 frpc 未注册为常驻服务，机器重启即断——这是"别人调我的 HeyGem"的唯一堵点。做法：schtasks 注册 frpc + startup.ps1（MACHINE-INDEX §四有现成修法），需要用户以管理员执行一次。
-2. **HeyGem token 鉴权**（家里侧）：`heygem_server_v2.py` 补 Bearer 校验（客户端 `heygem.token` 字段已预留）。隧道公网可达后没有鉴权=任何人可白嫖 GPU。
-3. **云端薄中继**（见 C2）：登录/额度/排队。M2 最小版可先用固定白名单 token 跳过。
+1. **frpc 常驻**（家里侧）：一键脚本已备好——**双击 `F:\Projects\register-services-autostart.bat`**（自动请求管理员权限注册 schtasks，2026-07-16 制成）。⚠️ 顺序：先做完第 2 步的 token 再开 frpc，避免 GPU 裸奔窗口期。
+2. ✅ **HeyGem token 鉴权**（2026-07-16 代码完成，XiaMuagent bf84ef4）：`heygem_server_v2.py` 已支持 `HEYGEM_TOKEN` 环境变量，设置后 /video/* 需 Bearer、/health 保持开放；未设置行为不变。**启用步骤（用户操作）**：自己的终端跑 `setx HEYGEM_TOKEN <自造随机串>` → 重启 HeyGem 服务 → VideoForge 设置页 heygem.token 填同一串。
+3. ✅ **云端薄中继 M2 最小版**（2026-07-16 代码完成，XiaMuagent 0651227）：`/api/relay/heygem/*` 路径镜像 HeyGem 原生 API（客户端只改 baseUrl+token 零代码接入）；白名单 token（system_config.relay_whitelist）+ 每 token 20 次/天粗额度 + mp4 流式转发。**部署步骤（用户操作）**：上海机 `cd /opt/XiaMuagent/backend && git pull && pm2 restart all`，MariaDB 手工 INSERT 三行 system_config（relay_heygem_url / relay_heygem_token / relay_whitelist）。注意两个 XiaMuagent 提交仅在本地，需先 push（等用户确认）。M3 做登录态/排队可视化/每用户额度。
 
 **"浏览器网址发给别人"的正确姿势**：⚠️ 绝不能把 VideoForge :5401 直接隧穿到公网——工作台无登录体系，暴露 = 任何人可读改你的 API key 配置与全部作品。近期给别人用的两条正路：① B 形态便携包（已可用，scripts/package-portable.ps1）+ 远程 HeyGem 中继；② C 形态（M3 起）做完登录后再考虑云工作台。
 
