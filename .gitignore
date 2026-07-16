@@ -11,3 +11,4 @@ workspaces/*
 .playwright-cli/
 *.tsbuildinfo
 output/
+quality-ledger.jsonl
