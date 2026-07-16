@@ -6,7 +6,7 @@ import { config, ROOT } from "./config.js";
 import { db, logEvent, recordUsage, updateJob } from "./db.js";
 import { runAgent } from "./agentRunner.js";
 import { captureJobCover, renderJob } from "./render.js";
-import { minimaxKey } from "./settings.js";
+import { loadSettings, minimaxKey } from "./settings.js";
 import { typecheckPresentation } from "./preview.js";
 import { health as heygemHealth, submitJob, taskStatus, downloadResult } from "./heygem.js";
 
@@ -833,7 +833,7 @@ export async function runFeedback(job, { chapter, message, phase, attachmentPath
         : phase === "数字人"
           ? "avatar-refine"
           : "refine";
-  return runAgent({ jobId: job.id, stage: "debug", cwd: job.workspace, prompt, onProgress, usageOperation, imagePaths: attachmentPath ? [join(job.workspace, attachmentPath)] : [] });
+  return runAgent({ engine: loadSettings().llm.feedbackEngine, jobId: job.id, stage: "debug", cwd: job.workspace, prompt, onProgress, usageOperation, imagePaths: attachmentPath ? [join(job.workspace, attachmentPath)] : [] });
 }
 
 export function readArticleTitle(workspace) {

@@ -34,7 +34,7 @@
 - 手动 `POST /api/jobs/:id/quality-audit` 保留全量截图模式。
 - 最新结果统一写入 `quality-audit.json`，避免修复后仍读取旧失败状态。
 
-当前未完成：首次生成通过率的长期统计、按主题/版式记录失败类型、把所有重复缺陷转为确定性 linter 规则。
+当前进展（2026-07-16）：首次分统计与缺陷归因已由 quality-ledger 承接（GET /api/quality/ledger）；静态 linter 已落地（server/src/chapterLint.js：字号下限=error，写死颜色/超长文本=warn，lint-allow 豁免通道）——流水线观察模式记账、受保护事务中阻断回滚，规则稳定后流水线转执法。仍未完成：按主题/版式的失败类型细分。
 
 ## 3. Skill 经验回写
 

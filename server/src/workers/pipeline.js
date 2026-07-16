@@ -1,10 +1,11 @@
-import { existsSync, readdirSync, rmSync } from "node:fs";
+import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { db, getJob, logEvent, updateJob } from "../db.js";
 import { nextStage, repairChapterQuality, runStage, stageDef } from "../stages.js";
 import { buildPresentation } from "../preview.js";
 import { auditPreviewQuality, inspectPreviewQuality } from "../render.js";
 import { defectSummary, recordQualityEntry } from "../qualityLedger.js";
+import { lintChapters, lintDefectSummary } from "../chapterLint.js";
 
 /**
  * DB-backed job runner. Picks queued jobs, runs their current stage,
@@ -53,6 +54,17 @@ async function advance(jobId) {
       if (job.stage === "chapter_gen") {
         try {
           await buildPresentation(getJob(jobId));
+          // 静态 linter 观察模式：毫秒级归因证据 + 账本（暂不阻断，规则稳定后转执法）
+          try {
+            const lint = lintChapters(join(getJob(jobId).workspace, "presentation"));
+            writeFileSync(join(getJob(jobId).workspace, "presentation", "public", "quality-lint.json"), `${JSON.stringify(lint, null, 2)}\n`);
+            if (lint.findings.length) {
+              recordQualityEntry({ kind: "lint", jobId, errors: lint.errors, warnings: lint.warnings, defects: lintDefectSummary(lint) });
+              logEvent(jobId, "quality", `静态规则：${lint.errors} 处违规、${lint.warnings} 处提醒（详见 quality-lint.json）`, lint.errors ? "error" : "info");
+            }
+          } catch (lintError) {
+            logEvent(jobId, "quality", `静态 linter 未能运行：${lintError.message}`, "error");
+          }
           let audit = await inspectPreviewQuality(getJob(jobId));
           if (!audit.pass) audit = await auditPreviewQuality(getJob(jobId));
           recordQualityEntry({ kind: "audit", jobId, phase: "first", score: audit.score, pass: audit.pass, checkedSteps: audit.checkedSteps, defects: defectSummary(audit) });

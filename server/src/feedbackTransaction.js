@@ -6,6 +6,7 @@ import { runFeedback } from "./stages.js";
 import { buildPresentation, typecheckPresentation } from "./preview.js";
 import { inspectPreviewQuality } from "./render.js";
 import { recordQualityEntry } from "./qualityLedger.js";
+import { lintChapters, lintEvidence } from "./chapterLint.js";
 
 /**
  * 受保护事务（QUALITY-ARCHITECTURE §4 / §9 R2）。
@@ -142,6 +143,12 @@ export async function runProtectedFeedback(job, params) {
   if (!kept.length) {
     dropSnapshot(presDir);
     return { ok: true, output: `${agentResult.output || ""}\n（本次没有产生允许范围内的文件改动）`, violations: violations.length };
+  }
+
+  // 静态规则先行（毫秒级）：确定性违规不必等浏览器门禁
+  const lint = lintChapters(presDir);
+  if (!lint.pass) {
+    return rollback(`静态规则违规 ${lint.errors} 处：${lintEvidence(lint, 3).join("；")}`);
   }
 
   onProgress(72, "正在验证修改（类型检查与构建）");

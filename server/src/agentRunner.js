@@ -65,8 +65,10 @@ export function ensureWorkspaceTrusted(cwd) {
  *
  * Returns { ok, output } — output is combined text tail for logging.
  */
-export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation, imagePaths = [] }) {
-  if (loadSettings().llm.mode === "api") {
+export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation, imagePaths = [], engine }) {
+  // engine 覆盖（subscription|api）；auto/缺省沿用全局 llm.mode
+  const mode = engine && engine !== "auto" ? engine : loadSettings().llm.mode;
+  if (mode === "api") {
     return runApiAgent({ jobId, stage, cwd, prompt, onProgress, usageOperation, imagePaths });
   }
   return new Promise((resolve) => {
