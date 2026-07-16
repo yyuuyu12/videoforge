@@ -181,7 +181,7 @@ async function splitAvatarPreviews(job, files, lipsync, avatarDir, presDir) {
     let duration = 0;
     for (const file of chapterFiles) duration += await mediaDuration(file);
     const output = join(chapterDir, `${chapter}.mp4`);
-    const cut = await sh("ffmpeg", ["-y", "-ss", cursor.toFixed(3), "-i", lipsync, "-t", duration.toFixed(3), "-c:v", "libx264", "-preset", "veryfast", "-an", output], presDir, job.id, "avatar_media");
+    const cut = await sh("ffmpeg", ["-y", "-ss", cursor.toFixed(3), "-i", lipsync, "-t", duration.toFixed(3), "-c:v", "libx264", "-preset", "veryfast", "-g", "25", "-an", output], presDir, job.id, "avatar_media");
     if (!cut.ok) return cut;
     cursor += duration;
     chapterIndex += 1;
@@ -641,7 +641,14 @@ const runners = {
       }
       if (state.status === "done") {
         avatarProgress(job.id, 88, "模型完成，正在下载数字人视频");
-        writeFileSync(lipsync, await downloadResult(submitted.taskId));
+        const rawLipsync = join(avatarDir, "lipsync-raw.mp4");
+        writeFileSync(rawLipsync, await downloadResult(submitted.taskId));
+        // HeyGem 输出关键帧间隔 10s，浏览器 seek 要从关键帧起解码、卡成幻灯片
+        //（job-20 实测）；重编码为 1s 关键帧让换步/换章 seek 瞬间完成。
+        avatarProgress(job.id, 89, "正在优化关键帧间隔（流畅换页）");
+        const gop = await sh("ffmpeg", ["-y", "-i", rawLipsync, "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-g", "25", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-c:a", "copy", lipsync], presDir, job.id, "avatar_media");
+        if (!gop.ok) return gop;
+        rmSync(rawLipsync, { force: true });
         writeJson(markerPath, { fingerprint, sourceFingerprint, generatedAt: new Date().toISOString() });
         const split = await splitAvatarPreviews(job, files, lipsync, avatarDir, presDir);
         if (!split.ok) return split;

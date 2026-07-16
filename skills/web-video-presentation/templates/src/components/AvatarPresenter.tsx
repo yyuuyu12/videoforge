@@ -16,11 +16,19 @@ function readDuration(audio: HTMLAudioElement): number | null {
     : null;
 }
 
+/** 偏差超过此值才硬 seek（换步/换章）；小偏差用播放速率悄悄追齐。 */
+const HARD_SEEK_THRESHOLD = 0.5;
+/** 暂停态的落位精度：停在正确的帧上即可，避免 seek 风暴。 */
+const PARK_THRESHOLD = 0.2;
+
 /**
- * 讲师头像窗口：muted 视频只做帧源，时间轴完全从动于音频时钟——
- * 每帧 video.currentTime = 之前所有 step 的音频总时长 + 当前音频位置。
- * 禁止自由播放（口型漂移）与每步 seek（每句闪跳）。
- * AVATAR_CONFIG.enabled=false 时由 App 直接不渲染本组件。
+ * 讲师头像窗口：muted 视频跟随音频时钟"播放 + 微调"——
+ * 音频播放时视频正常 play()，每帧只测量偏差：|偏差|<0.5s 用
+ * playbackRate 0.9~1.1 缓慢追齐（肉眼不可见），更大偏差（换步/
+ * 换章）才做一次硬 seek；音频暂停时视频暂停并落位到对应帧。
+ * 禁止逐帧 seek 驱动：lipsync.mp4 关键帧间隔达 10s，每次 seek
+ * 都要从关键帧起解码，每秒 60 次 seek 实测只能渲染出几帧
+ * （job-20"一顿一顿"的根因）。
  */
 export function AvatarPresenter({ getAudioEl, globalStep, audioSources }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
@@ -58,19 +66,30 @@ export function AvatarPresenter({ getAudioEl, globalStep, audioSources }: Props)
     let frameId = 0;
     const sync = () => {
       const video = videoRef.current;
-      if (video) {
+      if (video && video.readyState >= 1) {
+        const audio = getAudioEl();
         const priorDuration = durations
           .slice(0, globalStep)
           .reduce((total, duration) => total + duration, 0);
-        const stepTime = getAudioEl()?.currentTime ?? 0;
-        const targetTime = priorDuration + stepTime;
+        const stepTime = audio?.currentTime ?? 0;
         const maxTime = Number.isFinite(video.duration)
           ? Math.max(0, video.duration - 0.01)
-          : targetTime;
+          : Number.POSITIVE_INFINITY;
+        const target = Math.min(priorDuration + stepTime, maxTime);
+        const drift = video.currentTime - target;
+        const audioPlaying = audio != null && !audio.paused && !audio.ended;
 
-        video.pause();
-        if (Math.abs(video.currentTime - targetTime) > 0.025) {
-          video.currentTime = Math.min(targetTime, maxTime);
+        if (audioPlaying) {
+          if (Math.abs(drift) > HARD_SEEK_THRESHOLD) {
+            video.currentTime = target;
+            video.playbackRate = 1;
+          } else {
+            video.playbackRate = Math.min(1.1, Math.max(0.9, 1 - drift * 0.5));
+          }
+          if (video.paused) void video.play().catch(() => {});
+        } else {
+          if (!video.paused) video.pause();
+          if (Math.abs(drift) > PARK_THRESHOLD) video.currentTime = target;
         }
       }
       frameId = requestAnimationFrame(sync);
@@ -92,7 +111,7 @@ export function AvatarPresenter({ getAudioEl, globalStep, audioSources }: Props)
         src={`${import.meta.env.BASE_URL}avatar/lipsync.mp4`}
         muted
         playsInline
-        preload="metadata"
+        preload="auto"
       />
     </aside>
   );
