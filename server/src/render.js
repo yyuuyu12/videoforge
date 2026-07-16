@@ -216,7 +216,7 @@ export async function captureJobCover(job, { requireAvatar = false } = {}) {
  * intentionally DOM-based so failures identify the offending element instead
  * of relying on brittle pixel thresholds.
  */
-export async function auditPreviewQuality(job) {
+async function inspectPreviewQualityInternal(job, { captureScreenshots }) {
   const presDir = join(job.workspace, "presentation");
   if (!existsSync(join(presDir, "package.json"))) throw new Error("presentation has not been generated");
   const previewUrl = await preparePreview(job);
@@ -229,16 +229,20 @@ export async function auditPreviewQuality(job) {
     const outDir = join(presDir, "public");
     mkdirSync(outDir, { recursive: true });
     const shotsDir = join(outDir, "quality-audit");
-    rmSync(shotsDir, { recursive: true, force: true });
-    mkdirSync(shotsDir, { recursive: true });
+    if (captureScreenshots) {
+      rmSync(shotsDir, { recursive: true, force: true });
+      mkdirSync(shotsDir, { recursive: true });
+    }
     const steps = [];
     for (let index = 0; index < 250; index += 1) {
       const cursor = await readPreviewCursor(page);
       if (cursor.chapter < 0 || cursor.step < 0) throw new Error("preview progress controls are unavailable");
       const audit = await inspectCurrentPreviewStep(page);
-      const screenshot = `${String(index + 1).padStart(3, "0")}-c${cursor.chapter + 1}-s${cursor.step + 1}.png`;
-      await page.screenshot({ path: join(shotsDir, screenshot), type: "png" });
-      steps.push({ index, ...cursor, ...audit, screenshot });
+      const screenshot = captureScreenshots
+        ? `${String(index + 1).padStart(3, "0")}-c${cursor.chapter + 1}-s${cursor.step + 1}.png`
+        : null;
+      if (screenshot) await page.screenshot({ path: join(shotsDir, screenshot), type: "png" });
+      steps.push({ index, ...cursor, ...audit, ...(screenshot ? { screenshot } : {}) });
       await page.keyboard.press("ArrowRight");
       await page.waitForTimeout(120);
       const next = await readPreviewCursor(page);
@@ -249,15 +253,33 @@ export async function auditPreviewQuality(job) {
     const result = {
       score, pass: steps.length > 0 && steps.every((step) => step.pass),
       viewport: { width: 1920, height: 1080 }, checkedSteps: steps.length,
+      mode: captureScreenshots ? "visual-evidence" : "structure-first",
+      screenshotsCaptured: captureScreenshots ? steps.length : 0,
       worstStep: worst, steps, checkedAt: new Date().toISOString(),
     };
-    if (worst) writeFileSync(join(outDir, "quality-audit-worst.txt"), `${worst.screenshot}\n`);
+    if (captureScreenshots && worst?.screenshot) {
+      writeFileSync(join(outDir, "quality-audit-worst.txt"), `${worst.screenshot}\n`);
+    } else {
+      writeFileSync(join(outDir, "quality-structure.json"), `${JSON.stringify(result, null, 2)}\n`);
+      rmSync(join(outDir, "quality-audit-worst.txt"), { force: true });
+    }
     writeFileSync(join(outDir, "quality-audit.json"), `${JSON.stringify(result, null, 2)}\n`);
     logEvent(job.id, "quality", `preview quality ${result.score}/100${result.pass ? " (pass)" : " (issues found)"}`, result.pass ? "info" : "error");
     return result;
   } finally {
     await browser.close().catch(() => {});
   }
+}
+
+/** Cheap first-pass gate: render every step and inspect layout geometry without
+ * writing screenshots. Passing work proceeds directly to human approval. */
+export function inspectPreviewQuality(job) {
+  return inspectPreviewQualityInternal(job, { captureScreenshots: false });
+}
+
+/** Evidence mode for manual QA and failed first-pass checks. */
+export function auditPreviewQuality(job) {
+  return inspectPreviewQualityInternal(job, { captureScreenshots: true });
 }
 
 export async function renderJob(job) {
