@@ -66,7 +66,7 @@
   -> 通过则提交结果；越界、降分或构建失败则自动还原
 ```
 
-单章节修改只允许写选中章节目录和极少数明确注册文件；不能信任模型自述的 `git diff`。该事务目前是已确认方案，尚未实现。
+单章节修改只允许写选中章节目录和极少数明确注册文件；不能信任模型自述的 `git diff`。该事务已于 2026-07-16 实现（server/src/feedbackTransaction.js）：快照+基线分 → Agent → 真实差异白名单校验（越界文件自动还原）→ typecheck+build → 结构门禁分数对比 → 降分/失败整体回滚。R1 意图路由与 L1 质量记账本同日落地（feedbackRouter.js / qualityLedger.js，GET /api/quality/ledger）。
 
 ## 5. 字幕与数字人同步
 

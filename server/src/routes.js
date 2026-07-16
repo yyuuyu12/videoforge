@@ -17,6 +17,7 @@ import { health as heygemHealth } from "./heygem.js";
 import { extractDouyin } from "./douyin.js";
 import { searchTopics } from "./search.js";
 import { classifyFeedback } from "./feedbackRouter.js";
+import { runProtectedFeedback } from "./feedbackTransaction.js";
 import { ledgerStats, recordQualityEntry } from "./qualityLedger.js";
 import { retryExtraction } from "./workers/extractions.js";
 import { createSourceDocument } from "./sourceDocument.js";
@@ -1059,7 +1060,10 @@ api.post("/jobs/:id/feedback", async (req, res) => {
   res.json({ feedbackId: f.lastInsertRowid }); // respond immediately; agent runs async
 
   try {
-    const r = await runFeedback(job, {
+    // 画面类修改走受保护事务（快照/白名单/门禁对比/自动回滚）；
+    // 稿件类（md 文件）风险低，走普通路径。
+    const feedbackRunner = previewAffectingPhases.has(phase) ? runProtectedFeedback : runFeedback;
+    const r = await feedbackRunner(job, {
       chapter,
       message,
       phase,
