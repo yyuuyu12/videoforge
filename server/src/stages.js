@@ -8,6 +8,8 @@ import { runAgent } from "./agentRunner.js";
 import { captureJobCover, renderJob } from "./render.js";
 import { loadSettings, minimaxKey } from "./settings.js";
 import { typecheckPresentation } from "./preview.js";
+import { validateSubtitleCues, cueEvidence } from "./subtitleCheck.js";
+import { recordQualityEntry } from "./qualityLedger.js";
 import { health as heygemHealth, submitJob, taskStatus, downloadResult } from "./heygem.js";
 
 /**
@@ -538,6 +540,16 @@ const runners = {
 
     const r = await sh("node", ["scripts/gen-subtitle-cues.mjs"], presDir, job.id, "subtitle_cues");
     if (!r.ok) return r;
+
+    // 确定性契约执法：cue ≤10 字、时间递增（job-13/14 超长 cue 缺陷的回写规则）
+    const cueCheck = validateSubtitleCues(presDir);
+    if (!cueCheck.pass) {
+      recordQualityEntry({ kind: "subtitle-check", jobId: job.id, errors: cueCheck.errors, warnings: cueCheck.warnings, defects: { "cue-violation": cueCheck.errors } });
+      return { ok: false, note: `字幕 cue 数据违规 ${cueCheck.errors} 处：${cueEvidence(cueCheck, 3).join("；")}。请重试本环节（切分器会重新生成）。` };
+    }
+    if (cueCheck.warnings) {
+      logEvent(job.id, "subtitle_cues", `字幕契约提醒 ${cueCheck.warnings} 处（无 cue 的 step 将走一句一句的兜底展示）`);
+    }
 
     if (!existsSync(join(presDir, "src/components/Subtitle.tsx"))) {
       const skill = config.skills.videoAvatarSubtitles;

@@ -125,6 +125,12 @@ function cuesForWordsFile(path) {
   const words = [];
   for (const seg of data) {
     for (const w of seg.timestamped_words ?? []) {
+      // MiniMax 对数字/英文按音节逐条返回时，每条都带整词文本（如 "2017"
+      // 出现 4 条对应「二零一七」四个音节）——直接拼接会产出 "20172017…"
+      // 的连体怪（job-14 实测）。连续同文本的拉丁/数字词条只保留第一条
+      //（真实叙述里不会连念同一个数）。
+      const prev = words[words.length - 1];
+      if (prev && prev.text === w.word && /^[A-Za-z0-9]+$/.test(w.word)) continue;
       words.push({ text: w.word, startMs: w.time_begin });
     }
   }
