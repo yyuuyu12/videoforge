@@ -1,0 +1,27 @@
+.camera-viewport {
+  position: absolute;
+  inset: 0;
+  overflow: hidden; /* 推近后越出取景框的部分裁掉 */
+}
+
+.camera-layer {
+  position: absolute;
+  inset: 0;
+  transform-origin: 0 0;
+  transition: transform 0.9s cubic-bezier(0.33, 0.9, 0.25, 1); /* 缓入缓出，防晕 */
+  will-change: transform;
+}
+
+/* 聚光：径向遮罩四周压暗，中心保持通透 */
+.camera-spotlight {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.6s ease;
+  background: radial-gradient(
+    ellipse var(--spot-rx, 300px) var(--spot-ry, 200px) at var(--spot-x, 50%) var(--spot-y, 50%),
+    transparent 58%,
+    color-mix(in srgb, var(--surface, #000) 62%, transparent) 100%
+  );
+}

@@ -7,6 +7,8 @@ import { useCallback, useEffect, useMemo } from "react";
 import { AutoStartGate } from "./components/AutoStartGate";
 import { AutoToggle } from "./components/AutoToggle";
 import { AvatarPresenter } from "./components/AvatarPresenter";
+import { CameraLayer } from "./components/CameraLayer";
+import { EffectsProvider } from "./components/EffectsContext";
 import { ProgressBar } from "./components/ProgressBar";
 import { Stage } from "./components/Stage";
 import { Subtitle } from "./components/Subtitle";
@@ -83,8 +85,15 @@ export default function App() {
   return (
     <>
       <Stage onAdvance={stepper.next}>
+        {/* 效果 v1：镜头层只包章节画面——字幕与数字人在层外，镜头运动不影响它们 */}
         <div key={ch.id} className="scene">
-          <Cmp step={stepper.cursor.step} />
+          <EffectsProvider
+            value={{ chapterId: ch.id, step: stepper.cursor.step, getAudioEl }}
+          >
+            <CameraLayer chapterId={ch.id} step={stepper.cursor.step}>
+              <Cmp step={stepper.cursor.step} />
+            </CameraLayer>
+          </EffectsProvider>
         </div>
         <Subtitle
           chapterId={ch.id}

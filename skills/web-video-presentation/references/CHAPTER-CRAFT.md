@@ -4,6 +4,20 @@
 > 100/100 的章节骨架——安全区怎么写死在容器上、字号预算、数据驱动 step、
 > 滚动窗口列表。借鉴版式骨架，内容与主题必须原创。
 
+## 镜头与效果件（效果 v1）
+
+模板自带四个效果件，**只能从库里选、不得自造动画机制**（错误空间受控，四层校验兜底）：
+
+| 件 | 用法 | 纪律 |
+|---|---|---|
+| 镜头 | 在 `src/registry/cameraCues.ts` 按章/步声明 `{effect:"focus"\|"pan"\|"spotlight"\|"overview", target:".css-selector", zoom?}` | zoom∈[1.1,2.5]；**每章 ≤3 个镜头**；target 必须是该 step 真实存在的元素；讲到重点才推近，讲完拉回 overview |
+| 跟读高亮 | `<WordMark word="收藏率"><span>收藏率</span></WordMark>`（from `../../components/effects/WordMark`） | 口播念到该词时自动点亮；**每屏 ≤2 处**；word 必须真实出现在本步 narration 里 |
+| 数字滚动 | `<Counter to={37} suffix="%" />` | 用于关键数据；同屏 ≤2 个 |
+| 手绘圈注 | `<Annotate kind="circle">37%</Annotate>` 或 `kind="underline"` | 包裹式，每屏 ≤1 处，圈最重要的一个点 |
+
+镜头准则：**镜头为讲解服务，不是炫技**——推近的时机应与 narration 讲到该元素的时机一致；
+被推近的区域内容要经得起放大（无小字、无瑕疵）；聚光适合"多元素里点名一个"，推近适合"细节值得看大"。
+
 ---
 
 ## 这是视频，不是 PPT
