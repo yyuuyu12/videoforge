@@ -12,11 +12,11 @@ import { join } from "node:path";
  * 静态层不渲染页面。registry 缺失 = 该作品不用镜头，直接通过。
  */
 
-const EFFECTS = new Set(["focus", "pan", "spotlight", "overview", "host", "host-full"]);
+const EFFECTS = new Set(["focus", "pan", "spotlight", "magnify", "overview", "host", "host-full"]);
 /** 需要 target 的内容镜头（host/host-full 是数字人时刻，免 target）。 */
-const CONTENT_MOVES = new Set(["focus", "pan", "spotlight"]);
+const CONTENT_MOVES = new Set(["focus", "pan", "spotlight", "magnify"]);
 export const ZOOM_MIN = 1.1;
-export const ZOOM_MAX = 2.5;
+export const ZOOM_MAX = 3.0; // 大开大合：博主级 2-3 倍特写（2026-07-17 用户定稿）
 /** focus 的 zoom 下限：1.4 以下肉眼几乎不可见（job-24 实测 1.12 = 观感"没效果"）。 */
 export const FOCUS_ZOOM_MIN = 1.4;
 export const MOVES_PER_CHAPTER = 3;
@@ -50,7 +50,7 @@ export function validateCameraCues(presDir) {
       if (!cue) return;
       const where = `${chapterId} 第 ${stepIndex + 1} 步`;
       if (!EFFECTS.has(cue.effect)) {
-        findings.push({ rule: "camera-effect", severity: "error", detail: `${where} 未知镜头 "${cue.effect}"（词表：focus/pan/spotlight/overview/host/host-full）` });
+        findings.push({ rule: "camera-effect", severity: "error", detail: `${where} 未知镜头 "${cue.effect}"（词表：focus/pan/spotlight/magnify/overview/host/host-full）` });
         return;
       }
       if (CONTENT_MOVES.has(cue.effect)) {

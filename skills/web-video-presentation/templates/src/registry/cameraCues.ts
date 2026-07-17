@@ -2,7 +2,9 @@
 // 确定性校验（词表/倍数/预算）。没有条目 = 该步不动镜头（全景）。
 //
 // 约束（与 CHAPTER-CRAFT 镜头纪律一致，超出即判违规）：
-//   - zoom ∈ [1.1, 2.5]；focus 默认 1.8，pan 默认 1.15
+//   - 大开大合基调：zoom ∈ [1.1, 3.0]；focus 默认 2.0（<1.4 判违规——肉眼
+//     不可见等于没推）；magnify 放大镜默认 2.6（强推近+镜片压暗圈，给关键
+//     数字/核心结论的暴力特写）；pan 轻推 1.2
 //   - 每章非空内容镜头（focus/pan/spotlight）≤ 3 个（镜头为讲解服务，不是炫技）
 //   - target 必须是该 step 画面里真实存在的元素（运行时未命中会记入
 //     window.__vfCameraMisses 并原地不动，审计层可见）
@@ -14,6 +16,7 @@ export type CameraEffect =
   | "focus"
   | "pan"
   | "spotlight"
+  | "magnify"
   | "overview"
   | "host"
   | "host-full";

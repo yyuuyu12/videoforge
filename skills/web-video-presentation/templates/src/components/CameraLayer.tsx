@@ -14,9 +14,11 @@ declare global {
   }
 }
 
-const ZOOM_DEFAULT: Record<string, number> = { focus: 1.8, pan: 1.15 };
+// 大开大合基调（2026-07-17 用户定稿）：focus 常规 2.0、magnify 放大镜 2.6——
+// 效果要一眼可见，1.1x 级别的"轻推"只留给 pan。
+const ZOOM_DEFAULT: Record<string, number> = { focus: 2.0, pan: 1.2, magnify: 2.6 };
 const ZOOM_MIN = 1.1;
-const ZOOM_MAX = 2.5;
+const ZOOM_MAX = 3.0;
 /** 入场动画普遍 ≤500ms；先等它们落定再测量，避免取到中间态矩形。 */
 const MEASURE_DELAY_MS = 550;
 
@@ -93,9 +95,18 @@ export function CameraLayer({ chapterId, step, children }: Props) {
       // 目标居中，且取景框不越出画面（平移量夹在合法区间内）
       const tx = Math.min(0, Math.max(W - zoom * W, W / 2 - zoom * cx));
       const ty = Math.min(0, Math.max(H - zoom * H, H / 2 - zoom * cy));
-      spot.style.opacity = "0";
       layer.style.transition = prevTransition;
       layer.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${zoom})`;
+      if (cue.effect === "magnify") {
+        // 放大镜：强推近 + 画面中心亮、四周压暗的镜片圈（推近后目标已居中）
+        spot.style.setProperty("--spot-x", "50%");
+        spot.style.setProperty("--spot-y", "50%");
+        spot.style.setProperty("--spot-rx", `${(t.width / scale0) * zoom * 0.62}px`);
+        spot.style.setProperty("--spot-ry", `${(t.height / scale0) * zoom * 0.62}px`);
+        spot.style.opacity = "1";
+      } else {
+        spot.style.opacity = "0";
+      }
     }, MEASURE_DELAY_MS);
 
     return () => window.clearTimeout(timer);

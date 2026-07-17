@@ -37,7 +37,7 @@ test("focus 缺 target 判 error", () => {
 
 test("zoom 越界与未知词表判 error", () => {
   const presDir = makeRegistry({
-    hook: [{ effect: "focus", target: ".a", zoom: 4 }, { effect: "shake", target: ".b" }],
+    hook: [{ effect: "focus", target: ".a", zoom: 4.5 }, { effect: "shake", target: ".b" }],
   });
   const r = validateCameraCues(presDir);
   assert.equal(r.errors, 2);
