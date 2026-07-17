@@ -97,13 +97,15 @@ function extractSignalsInPage() {
   };
 }
 
-/** 读章节顺序与每章步数（narrations 为真相源）。 */
+/** 读章节顺序与每章步数（narrations 为真相源）。
+ *  兼容单/双引号与压缩格式——job-25 实测用户模型写 id:'xxx' 紧凑风格，
+ *  只认双引号会读出 0 章、编排整体空转。 */
 function readStructure(presDir) {
   const chaptersTs = readFileSync(join(presDir, "src/registry/chapters.ts"), "utf8");
-  const order = [...chaptersTs.matchAll(/id:\s*"([^"]+)"/g)].map((m) => m[1]);
+  const order = [...chaptersTs.matchAll(/id:\s*["']([^"']+)["']/g)].map((m) => m[1]);
   const steps = order.map((id) => {
     const n = readFileSync(join(presDir, "src/chapters", id, "narrations.ts"), "utf8");
-    return [...n.matchAll(/"(?:[^"\\]|\\.)*"/g)].length;
+    return [...n.matchAll(/(["'])(?:[^"'\\\n]|\\.)*?\1/g)].length;
   });
   return { order, steps };
 }
