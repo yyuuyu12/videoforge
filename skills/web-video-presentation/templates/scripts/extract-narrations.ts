@@ -21,7 +21,7 @@
  *
  * Empty narration strings are skipped (silent steps don't need a TTS file).
  */
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, writeFile, readdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { resolve, dirname, join } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
@@ -40,33 +40,36 @@ interface Segment {
   audio: string;
 }
 
-/** Parse `src/registry/chapters.ts` to learn chapter id order. */
+/**
+ * Parse `src/registry/chapters.ts` to learn chapter id order, then match
+ * each id to its folder by scanning the actual `src/chapters/` directory
+ * on disk — not by parsing the shape of the import statement.
+ *
+ * Earlier versions matched folders via a regex over
+ * `from "../chapters/<folder>/narrations"` import lines. That broke the
+ * moment a generation wrote a combined import instead (e.g.
+ * `import { Opening, narrations } from "../chapters/01-opening"`, which is
+ * a perfectly valid ChapterDef — Component + narrations from one file) —
+ * the regex found zero folders and every chapter failed to resolve
+ * (job-26 real incident, 2026-07-17). Scanning disk removes the dependency
+ * on any particular import shape entirely.
+ */
 async function readChapterOrder(): Promise<{ id: string; folder: string }[]> {
   const src = await readFile(REGISTRY_PATH, "utf8");
-  // Match: id: "..."   AND   from "../chapters/<folder>/narrations"
-  const ids: string[] = [];
-  const folders: Record<string, string> = {};
+  const ids = [...src.matchAll(/id:\s*["']([^"']+)["']/g)].map((m) => m[1]!);
 
-  for (const m of src.matchAll(/id:\s*["']([^"']+)["']/g)) ids.push(m[1]!);
-  for (const m of src.matchAll(
-    /from\s*["']\.\.\/chapters\/([^"'\/]+)\/narrations["']/g,
-  )) {
-    // We map by import order; pair 1:1 with `ids`. Both orders are the
-    // chapter declaration order in CHAPTERS so they line up.
-    const folder = m[1]!;
-    folders[folder] = folder;
-  }
+  const entries = await readdir(CHAPTERS_DIR, { withFileTypes: true });
+  const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
 
-  // Map id → folder by reading each chapter's narrations.ts existence.
-  // Folders are typically `<NN>-<id>`; fall back to plain `<id>` if not.
   const result: { id: string; folder: string }[] = [];
   for (const id of ids) {
-    const candidates = Object.keys(folders).filter((f) => f.endsWith(`-${id}`));
-    const folder = candidates[0] ?? Object.keys(folders).find((f) => f === id);
+    // Prefer exact match, then "<prefix>-<id>" (numbered folder convention).
+    const folder = dirs.find((f) => f === id) ?? dirs.find((f) => f.endsWith(`-${id}`));
     if (!folder) {
       throw new Error(
         `chapter id "${id}" registered but no matching folder found ` +
-          `under src/chapters/. Expected something like NN-${id}/narrations.ts`,
+          `under src/chapters/ (looked for "${id}" or "*-${id}"). ` +
+          `Existing folders: ${dirs.join(", ") || "(none)"}`,
       );
     }
     result.push({ id, folder });
