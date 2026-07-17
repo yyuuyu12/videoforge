@@ -10,7 +10,8 @@
 
 | 件 | 用法 | 纪律 |
 |---|---|---|
-| 镜头 | 在 `src/registry/cameraCues.ts` 按章/步声明 `{effect:"focus"\|"pan"\|"spotlight"\|"overview", target:".css-selector", zoom?}` | zoom∈[1.1,2.5]；**每章 ≤3 个镜头**；target 必须是该 step 真实存在的元素；讲到重点才推近，讲完拉回 overview |
+| 镜头 | 在 `src/registry/cameraCues.ts` 按章/步声明 `{effect:"focus"\|"pan"\|"spotlight"\|"overview", target:".css-selector", zoom?}` | zoom∈[1.1,2.5]；**每章 ≤3 个内容镜头**；target 必须是该 step 真实存在的元素；讲到重点才推近，讲完拉回 overview |
+| 数字人时刻 | 同一 registry 声明 `{effect:"host"}`（讲述者时刻：数字人放大到主位、内容压暗）或 `{effect:"host-full"}`（开场全屏出镜） | 免 target；**host 每章 ≤1、host-full 全片 ≤1（开场专用）**；用在开场钩子/章节转折/结尾召唤；该步画面要极简（内容已退后，别放关键信息）；启用数字人的作品才生效 |
 | 跟读高亮 | `<WordMark word="收藏率"><span>收藏率</span></WordMark>`（from `../../components/effects/WordMark`） | 口播念到该词时自动点亮；**每屏 ≤2 处**；word 必须真实出现在本步 narration 里 |
 | 数字滚动 | `<Counter to={37} suffix="%" />` | 用于关键数据；同屏 ≤2 个 |
 | 手绘圈注 | `<Annotate kind="circle">37%</Annotate>` 或 `kind="underline"` | 包裹式，每屏 ≤1 处，圈最重要的一个点 |

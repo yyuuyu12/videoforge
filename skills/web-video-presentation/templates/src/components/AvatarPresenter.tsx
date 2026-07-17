@@ -8,6 +8,11 @@ interface Props {
   globalStep: number;
   /** 全部 step 音频地址（播放顺序），用于累计偏移。 */
   audioSources: string[];
+  /**
+   * 数字人时刻（效果 v1）："host" = 讲述者时刻（窗口放大到画面主位），
+   * "full" = 开场全屏出镜；缺省小窗。由 App 从 CAMERA_CUES 推导传入。
+   */
+  hostMode?: "none" | "host" | "full";
 }
 
 function readDuration(audio: HTMLAudioElement): number | null {
@@ -30,7 +35,7 @@ const PARK_THRESHOLD = 0.2;
  * 都要从关键帧起解码，每秒 60 次 seek 实测只能渲染出几帧
  * （job-20"一顿一顿"的根因）。
  */
-export function AvatarPresenter({ getAudioEl, globalStep, audioSources }: Props) {
+export function AvatarPresenter({ getAudioEl, globalStep, audioSources, hostMode = "none" }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const [durations, setDurations] = useState<number[]>(() =>
     audioSources.map(() => 0),
@@ -101,7 +106,9 @@ export function AvatarPresenter({ getAudioEl, globalStep, audioSources }: Props)
 
   return (
     <aside
-      className={`avatar-presenter avatar-presenter--${AVATAR_CONFIG.position}`}
+      className={`avatar-presenter avatar-presenter--${AVATAR_CONFIG.position}${
+        hostMode !== "none" ? ` avatar-presenter--host-${hostMode}` : ""
+      }`}
       data-no-advance
       aria-label="讲师"
     >

@@ -16,6 +16,7 @@ import { useAudioPlayer } from "./hooks/useAudioPlayer";
 import { useAutoMode } from "./hooks/useAutoMode";
 import { useStepper } from "./hooks/useStepper";
 import { AVATAR_CONFIG } from "./registry/avatarConfig";
+import { CAMERA_CUES } from "./registry/cameraCues";
 import { CHAPTERS } from "./registry/chapters";
 
 /**
@@ -80,7 +81,22 @@ export default function App() {
     rootStyle.setProperty("--stage-pad-x-end", `${AVATAR_CONFIG.reservePx}px`);
     rootStyle.setProperty("--avatar-window-w", `${AVATAR_CONFIG.windowWidthPx}px`);
     rootStyle.setProperty("--avatar-window-h", `${AVATAR_CONFIG.windowHeightPx}px`);
+    rootStyle.setProperty(
+      "--avatar-window-aspect",
+      String(AVATAR_CONFIG.windowWidthPx / Math.max(1, AVATAR_CONFIG.windowHeightPx)),
+    );
   }, []);
+
+  // 数字人时刻（效果 v1）：host = 讲述者时刻，host-full = 开场全屏。
+  // 与内容镜头同一份 registry 声明；未启用数字人时忽略。
+  const hostCue = CAMERA_CUES[ch.id]?.[stepper.cursor.step]?.effect;
+  const hostMode: "none" | "host" | "full" = !AVATAR_CONFIG.enabled
+    ? "none"
+    : hostCue === "host-full"
+      ? "full"
+      : hostCue === "host"
+        ? "host"
+        : "none";
 
   return (
     <>
@@ -101,11 +117,16 @@ export default function App() {
           fallbackText={stepText}
           getAudioEl={getAudioEl}
         />
+        {/* 数字人时刻的内容压暗层：在画面之上、数字人之下 */}
+        {AVATAR_CONFIG.enabled && (
+          <div className={`host-dim${hostMode !== "none" ? " host-dim--on" : ""}`} aria-hidden="true" />
+        )}
         {AVATAR_CONFIG.enabled && (
           <AvatarPresenter
             getAudioEl={getAudioEl}
             globalStep={stepper.globalIndex}
             audioSources={avatarAudioSources}
+            hostMode={hostMode}
           />
         )}
       </Stage>

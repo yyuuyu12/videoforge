@@ -9,6 +9,41 @@
   background: var(--surface-2, rgba(0, 0, 0, 0.2));
   box-shadow: 0 20px 56px rgba(0, 0, 0, 0.28);
   pointer-events: none;
+  /* 数字人时刻的放大/归位过渡（效果 v1） */
+  transition:
+    width 0.85s cubic-bezier(0.33, 0.9, 0.25, 1),
+    height 0.85s cubic-bezier(0.33, 0.9, 0.25, 1),
+    top 0.85s cubic-bezier(0.33, 0.9, 0.25, 1),
+    right 0.85s cubic-bezier(0.33, 0.9, 0.25, 1),
+    bottom 0.85s cubic-bezier(0.33, 0.9, 0.25, 1),
+    border-radius 0.85s ease,
+    transform 0.85s cubic-bezier(0.33, 0.9, 0.25, 1);
+}
+
+/* 讲述者时刻：窗口放大到画面主位（居中偏右，素材放大 ~2 倍以内保住画质） */
+.avatar-presenter.avatar-presenter--host-host {
+  top: 50%;
+  right: 50%;
+  bottom: auto;
+  width: calc(var(--avatar-window-w, 252px) * 2);
+  height: calc(var(--avatar-window-h, 448px) * 2);
+  transform: translate(50%, -50%);
+  border-radius: 36px;
+  z-index: 7; /* 在压暗层之上 */
+}
+
+/* 开场全屏出镜：竖幅素材垂直铺满、水平居中（16:9 舞台上柱状留边由压暗层补齐）
+   宽度由 aspect-ratio 自动求出（App 会按 AVATAR_CONFIG 设 --avatar-window-aspect） */
+.avatar-presenter.avatar-presenter--host-full {
+  top: 2%;
+  right: 50%;
+  bottom: auto;
+  width: auto;
+  height: 96%;
+  aspect-ratio: var(--avatar-window-aspect, 0.5625);
+  transform: translate(50%, 0);
+  border-radius: 24px;
+  z-index: 7;
 }
 
 .avatar-presenter--right-third {

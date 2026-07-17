@@ -12,6 +12,20 @@
   will-change: transform;
 }
 
+/* 数字人时刻的内容压暗层（App 渲染，位于画面之上、数字人之下） */
+.host-dim {
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.7s ease;
+  background: color-mix(in srgb, var(--surface, #000) 78%, transparent);
+}
+.host-dim--on {
+  opacity: 1;
+}
+
 /* 聚光：径向遮罩四周压暗，中心保持通透 */
 .camera-spotlight {
   position: absolute;

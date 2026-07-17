@@ -47,8 +47,9 @@ export function CameraLayer({ chapterId, step, children }: Props) {
       spot.style.opacity = "0";
     };
 
-    if (!cue || cue.effect === "overview" || !cue.target) {
-      if (cue && cue.effect !== "overview" && !cue.target) {
+    // host/host-full 是数字人时刻：内容层保持全景（压暗由 App 的遮罩层负责）
+    if (!cue || cue.effect === "overview" || cue.effect === "host" || cue.effect === "host-full" || !cue.target) {
+      if (cue && !["overview", "host", "host-full"].includes(cue.effect) && !cue.target) {
         (window.__vfCameraMisses ??= []).push({ chapterId, step, target: "(missing target)" });
       }
       reset();

@@ -3,11 +3,20 @@
 //
 // 约束（与 CHAPTER-CRAFT 镜头纪律一致，超出即判违规）：
 //   - zoom ∈ [1.1, 2.5]；focus 默认 1.8，pan 默认 1.15
-//   - 每章非空镜头 ≤ 3 个（镜头为讲解服务，不是炫技）
+//   - 每章非空内容镜头（focus/pan/spotlight）≤ 3 个（镜头为讲解服务，不是炫技）
 //   - target 必须是该 step 画面里真实存在的元素（运行时未命中会记入
 //     window.__vfCameraMisses 并原地不动，审计层可见）
+//   - host（讲述者时刻）：数字人窗口放大到画面主位、内容压暗退后——用在
+//     开场钩子/章节转折/结尾召唤，每章 ≤1；host-full（开场全屏出镜）全片 ≤1，
+//     通常只用在第一章第一步。两者免 target。该步画面应当极简（内容层已退后）。
 
-export type CameraEffect = "focus" | "pan" | "spotlight" | "overview";
+export type CameraEffect =
+  | "focus"
+  | "pan"
+  | "spotlight"
+  | "overview"
+  | "host"
+  | "host-full";
 
 export interface CameraCue {
   effect: CameraEffect;
