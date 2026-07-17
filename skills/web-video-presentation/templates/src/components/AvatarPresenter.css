@@ -1,4 +1,7 @@
 .avatar-presenter {
+  /* 视频就绪前整窗隐藏（lipsync 未生成/404 时不显示空白框——job-25 实翻车） */
+  opacity: 0;
+  transition-property: opacity, width, height, top, right, bottom, border-radius, transform;
   position: absolute;
   right: 40px;
   z-index: 5;
@@ -11,6 +14,7 @@
   pointer-events: none;
   /* 数字人时刻的放大/归位过渡（效果 v1） */
   transition:
+    opacity 0.4s ease,
     width 0.85s cubic-bezier(0.33, 0.9, 0.25, 1),
     height 0.85s cubic-bezier(0.33, 0.9, 0.25, 1),
     top 0.85s cubic-bezier(0.33, 0.9, 0.25, 1),
@@ -18,6 +22,10 @@
     bottom 0.85s cubic-bezier(0.33, 0.9, 0.25, 1),
     border-radius 0.85s ease,
     transform 0.85s cubic-bezier(0.33, 0.9, 0.25, 1);
+}
+
+.avatar-presenter--ready {
+  opacity: 1;
 }
 
 /* 讲述者时刻：窗口放大到画面主位（居中偏右，素材放大 ~2 倍以内保住画质） */

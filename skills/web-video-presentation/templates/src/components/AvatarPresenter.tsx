@@ -38,6 +38,7 @@ const PARK_THRESHOLD = 0.2;
 export function AvatarPresenter({ getAudioEl, globalStep, audioSources, hostMode = "none" }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
   const blurRef = useRef<HTMLVideoElement | null>(null);
+  const [videoReady, setVideoReady] = useState(false);
   const [durations, setDurations] = useState<number[]>(() =>
     audioSources.map(() => 0),
   );
@@ -136,13 +137,15 @@ export function AvatarPresenter({ getAudioEl, globalStep, audioSources, hostMode
       <aside
         className={`avatar-presenter avatar-presenter--${AVATAR_CONFIG.position}${
           hostMode !== "none" ? ` avatar-presenter--host-${hostMode}` : ""
-        }`}
+        }${videoReady ? " avatar-presenter--ready" : ""}`}
         data-no-advance
         aria-label="讲师"
       >
         <video
           ref={videoRef}
           className="avatar-presenter__video"
+          onLoadedData={() => setVideoReady(true)}
+          onError={() => setVideoReady(false)}
           src={`${import.meta.env.BASE_URL}avatar/lipsync.mp4`}
           muted
           playsInline

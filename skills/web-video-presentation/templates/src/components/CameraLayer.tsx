@@ -91,11 +91,56 @@ export function CameraLayer({ chapterId, step, children }: Props) {
         return;
       }
 
-      const zoom = clampZoom(cue);
-      // 目标居中，且取景框不越出画面（平移量夹在合法区间内）
-      const tx = Math.min(0, Math.max(W - zoom * W, W / 2 - zoom * cx));
-      const ty = Math.min(0, Math.max(H - zoom * H, H / 2 - zoom * cy));
+      // 取景框切字守卫（job-25 实翻车："2015"被切成"015"、标题切半）：
+      // 收集可见文字块的本地矩形，若取景框边缘从中间切过任何文字，
+      // 逐级降倍率重试；降到 1.35 仍切则放弃推近、改用聚光。
+      const textRects: { l: number; r: number; t: number; b: number }[] = [];
+      for (const node of Array.from(layer.querySelectorAll<HTMLElement>("*"))) {
+        if (node.children.length > 0) continue;
+        const text = (node.textContent || "").trim();
+        if (text.length < 2) continue;
+        const cs = getComputedStyle(node);
+        if (parseFloat(cs.fontSize) < 18 || cs.visibility === "hidden" || Number(cs.opacity) < 0.1) continue;
+        const rr = node.getBoundingClientRect();
+        if (rr.width < 10 || rr.height < 10) continue;
+        textRects.push({
+          l: (rr.left - layerRect.left) / scale0,
+          r: (rr.right - layerRect.left) / scale0,
+          t: (rr.top - layerRect.top) / scale0,
+          b: (rr.bottom - layerRect.top) / scale0,
+        });
+      }
+      const frameFor = (z: number) => {
+        const fx = Math.min(0, Math.max(W - z * W, W / 2 - z * cx));
+        const fy = Math.min(0, Math.max(H - z * H, H / 2 - z * cy));
+        return { fx, fy, vx0: -fx / z, vx1: (-fx + W) / z, vy0: -fy / z, vy1: (-fy + H) / z };
+      };
+      const cutsText = (z: number) => {
+        const { vx0, vx1, vy0, vy1 } = frameFor(z);
+        const EDGE = 10; // 允许贴边 10px 内的裁切余量
+        return textRects.some((rect) => {
+          const overlaps = rect.r > vx0 && rect.l < vx1 && rect.b > vy0 && rect.t < vy1;
+          if (!overlaps) return false;
+          const cutX = (rect.l < vx0 - EDGE && rect.r > vx0 + EDGE) || (rect.r > vx1 + EDGE && rect.l < vx1 - EDGE);
+          const cutY = (rect.t < vy0 - EDGE && rect.b > vy0 + EDGE) || (rect.b > vy1 + EDGE && rect.t < vy1 - EDGE);
+          return cutX || cutY;
+        });
+      };
+      let zoom = clampZoom(cue);
+      while (zoom >= 1.35 && cutsText(zoom)) zoom = Math.round((zoom - 0.15) * 100) / 100;
       layer.style.transition = prevTransition;
+      if (zoom < 1.35) {
+        // 推近做不到不切字：退化为聚光（同一 target，注意力效果保留）
+        const rx = Math.max(t.width, 120) / scale0 * 0.72;
+        const ry = Math.max(t.height, 120) / scale0 * 0.72;
+        spot.style.setProperty("--spot-x", `${(cx / W) * 100}%`);
+        spot.style.setProperty("--spot-y", `${(cy / H) * 100}%`);
+        spot.style.setProperty("--spot-rx", `${rx}px`);
+        spot.style.setProperty("--spot-ry", `${ry}px`);
+        spot.style.opacity = "1";
+        return;
+      }
+      const { fx: tx, fy: ty } = frameFor(zoom);
       layer.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${zoom})`;
       if (cue.effect === "magnify") {
         // 放大镜：强推近 + 画面中心亮、四周压暗的镜片圈（推近后目标已居中）
