@@ -489,6 +489,7 @@ const runners = {
       `- 全部注册进 src/registry/chapters.ts，每次结构变化 bump useStepper.ts 的 STORAGE_KEY`,
       `- 颜色/字体只用主题 token；严格遵守上面的作品级字号与排版密度预设`,
       `- 首次生成必须满足 CHAPTER-CRAFT 的“首次生成质量契约”：先拆分超预算内容，不得依赖生成后的截图修复来补救拥挤、溢出、短标题三行或安全区冲突`,
+      `- 动笔前先读 ${skill}/references/EXEMPLARS.md（真实作品首次验收 100 分的三个章节骨架）：安全区写死在容器、数据驱动 step、滚动窗口列表——借鉴骨架，内容原创`,
       `- kicker 用 .title-label 一类的大标题样式，不要小号说明文字`,
       `- 每章完成后自己跑完工自检并修复 FAIL 项；全项目 npx tsc --noEmit 必须 0 错误`,
       `- 可以并行使用子任务加速，但最终交付要整体一致`,

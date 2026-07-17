@@ -5,7 +5,7 @@ import { nextStage, repairChapterQuality, runStage, stageDef } from "../stages.j
 import { buildPresentation } from "../preview.js";
 import { auditPreviewQuality, inspectPreviewQuality } from "../render.js";
 import { defectSummary, recordQualityEntry } from "../qualityLedger.js";
-import { lintChapters, lintDefectSummary } from "../chapterLint.js";
+import { lintChapters, lintDefectSummary, lintEvidence } from "../chapterLint.js";
 import { preflightWarnings } from "../preflight.js";
 
 /**
@@ -69,7 +69,8 @@ async function advance(jobId) {
       if (job.stage === "chapter_gen") {
         try {
           await buildPresentation(getJob(jobId));
-          // 静态 linter 观察模式：毫秒级归因证据 + 账本（暂不阻断，规则稳定后转执法）
+          // 静态 linter 执法模式（2026-07-16 转正：7 个满分作品实测零误伤）：
+          // error 级违规直接判章节生成失败并给出毫秒级归因证据；warn 只记账。
           try {
             const lint = lintChapters(join(getJob(jobId).workspace, "presentation"));
             writeFileSync(join(getJob(jobId).workspace, "presentation", "public", "quality-lint.json"), `${JSON.stringify(lint, null, 2)}\n`);
@@ -77,7 +78,11 @@ async function advance(jobId) {
               recordQualityEntry({ kind: "lint", jobId, errors: lint.errors, warnings: lint.warnings, defects: lintDefectSummary(lint) });
               logEvent(jobId, "quality", `静态规则：${lint.errors} 处违规、${lint.warnings} 处提醒（详见 quality-lint.json）`, lint.errors ? "error" : "info");
             }
+            if (lint.errors > 0) {
+              throw new Error(`静态规则 ${lint.errors} 处违规：${lintEvidence(lint, 3).join("；")}（确定性检查，重试本环节会重新生成）`);
+            }
           } catch (lintError) {
+            if (/静态规则 \d+ 处违规/.test(lintError.message)) throw lintError;
             logEvent(jobId, "quality", `静态 linter 未能运行：${lintError.message}`, "error");
           }
           let audit = await inspectPreviewQuality(getJob(jobId));
