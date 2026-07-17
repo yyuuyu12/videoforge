@@ -16,6 +16,6 @@ export const AVATAR_CONFIG: AvatarConfig = {
   enabled: false,
   position: "right-third",
   reservePx: 0,
-  windowWidthPx: 252,
-  windowHeightPx: 448,
+  windowWidthPx: 277,
+  windowHeightPx: 493,
 };
