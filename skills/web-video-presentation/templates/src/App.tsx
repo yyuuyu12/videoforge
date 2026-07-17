@@ -90,13 +90,15 @@ export default function App() {
   // 数字人时刻（效果 v1）：host = 讲述者时刻，host-full = 开场全屏。
   // 与内容镜头同一份 registry 声明；未启用数字人时忽略。
   const hostCue = CAMERA_CUES[ch.id]?.[stepper.cursor.step]?.effect;
-  const hostMode: "none" | "host" | "full" = !AVATAR_CONFIG.enabled
+  const hostMode: "none" | "host" | "full" | "split" = !AVATAR_CONFIG.enabled
     ? "none"
     : hostCue === "host-full"
       ? "full"
-      : hostCue === "host"
-        ? "host"
-        : "none";
+      : hostCue === "host-split"
+        ? "split"
+        : hostCue === "host"
+          ? "host"
+          : "none";
 
   return (
     <>
@@ -111,15 +113,16 @@ export default function App() {
             </CameraLayer>
           </EffectsProvider>
         </div>
-        <Subtitle
+        {/* 钩子分屏期隐藏底部字幕：右栏大字本身就是字幕 */}
+        {hostMode !== "split" && <Subtitle
           chapterId={ch.id}
           step={stepper.cursor.step}
           fallbackText={stepText}
           getAudioEl={getAudioEl}
-        />
+        />}
         {/* 数字人时刻的内容压暗层：在画面之上、数字人之下 */}
         {AVATAR_CONFIG.enabled && (
-          <div className={`host-dim${hostMode !== "none" ? " host-dim--on" : ""}`} aria-hidden="true" />
+          <div className={`host-dim${hostMode === "host" || hostMode === "full" ? " host-dim--on" : ""}`} aria-hidden="true" />
         )}
         {AVATAR_CONFIG.enabled && (
           <AvatarPresenter

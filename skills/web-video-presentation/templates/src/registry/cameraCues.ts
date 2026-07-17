@@ -19,7 +19,8 @@ export type CameraEffect =
   | "magnify"
   | "overview"
   | "host"
-  | "host-full";
+  | "host-full"
+  | "host-split";
 
 export interface CameraCue {
   effect: CameraEffect;

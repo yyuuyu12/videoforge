@@ -193,7 +193,7 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
 
   // 数字人时刻布点（AI 未布时机器兜底）
   if (avatarEnabled && order.length) {
-    const hasHostFull = Object.values(cues).some((arr) => arr.some((c) => c?.effect === "host-full"));
+    const hasHostFull = Object.values(cues).some((arr) => arr.some((c) => c?.effect === "host-full" || c?.effect === "host-split"));
     if (!hasHostFull) cues[order[0]][0] = { effect: "host-full" };
     const mid = order[Math.floor(order.length / 2)];
     if (!cues[mid].some((c) => c?.effect === "host")) cues[mid][0] = { effect: "host" };

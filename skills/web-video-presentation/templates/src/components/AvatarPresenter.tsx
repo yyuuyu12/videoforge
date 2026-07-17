@@ -12,7 +12,7 @@ interface Props {
    * 数字人时刻（效果 v1）："host" = 讲述者时刻（窗口放大到画面主位），
    * "full" = 开场全屏出镜；缺省小窗。由 App 从 CAMERA_CUES 推导传入。
    */
-  hostMode?: "none" | "host" | "full";
+  hostMode?: "none" | "host" | "full" | "split";
 }
 
 function readDuration(audio: HTMLAudioElement): number | null {

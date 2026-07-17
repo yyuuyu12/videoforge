@@ -186,3 +186,32 @@
   75% { transform: translate(2px, 1px); }
   100% { transform: translate(0, 0); }
 }
+
+/* ===== host-split 钩子分屏（效果 v2a+）===== */
+
+/* 右栏钩子大字：左边让出 1:1 人物区（80px + 方形 777px + 间距） */
+.fx-hooktext {
+  position: absolute;
+  top: 50%;
+  transform: translateY(-50%);
+  left: 920px;
+  right: 70px;
+  display: flex;
+  flex-direction: column;
+  gap: 30px;
+}
+.fx-hooktext__line {
+  font: 800 128px/1.12 var(--font-display-cn);
+  color: var(--text);
+  letter-spacing: 0.01em;
+  animation: fx-hook-in 0.55s cubic-bezier(0.22, 1.35, 0.36, 1) both;
+  animation-delay: calc(var(--fx-line, 0) * 420ms + 180ms);
+}
+.fx-hooktext__line em {
+  font-style: normal;
+  color: var(--accent);
+}
+@keyframes fx-hook-in {
+  from { opacity: 0; transform: translateX(60px) scale(1.5); }
+  to { opacity: 1; transform: translateX(0) scale(1); }
+}

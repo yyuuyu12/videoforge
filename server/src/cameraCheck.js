@@ -12,7 +12,7 @@ import { join } from "node:path";
  * 静态层不渲染页面。registry 缺失 = 该作品不用镜头，直接通过。
  */
 
-const EFFECTS = new Set(["focus", "pan", "spotlight", "magnify", "overview", "host", "host-full"]);
+const EFFECTS = new Set(["focus", "pan", "spotlight", "magnify", "overview", "host", "host-full", "host-split"]);
 /** 需要 target 的内容镜头（host/host-full 是数字人时刻，免 target）。 */
 const CONTENT_MOVES = new Set(["focus", "pan", "spotlight", "magnify"]);
 export const ZOOM_MIN = 1.1;
@@ -53,7 +53,7 @@ export function validateCameraCues(presDir, { density = "dense" } = {}) {
       if (!cue) return;
       const where = `${chapterId} 第 ${stepIndex + 1} 步`;
       if (!EFFECTS.has(cue.effect)) {
-        findings.push({ rule: "camera-effect", severity: "error", detail: `${where} 未知镜头 "${cue.effect}"（词表：focus/pan/spotlight/magnify/overview/host/host-full）` });
+        findings.push({ rule: "camera-effect", severity: "error", detail: `${where} 未知镜头 "${cue.effect}"（词表：focus/pan/spotlight/magnify/overview/host/host-full/host-split）` });
         return;
       }
       if (CONTENT_MOVES.has(cue.effect)) {
@@ -76,6 +76,17 @@ export function validateCameraCues(presDir, { density = "dense" } = {}) {
     }
     if (hosts > HOSTS_PER_CHAPTER) {
       findings.push({ rule: "host-budget", severity: "error", detail: `${chapterId} 共 ${hosts} 个讲述者时刻，超出每章 ${HOSTS_PER_CHAPTER} 个` });
+    }
+  }
+  // host-split 只允许出现在第一章、且必须是从第 1 步起的连续前缀（钩子开场专用）
+  const firstChapter = Object.keys(cues)[0];
+  for (const [chapterId, steps] of Object.entries(cues)) {
+    const splitIdx = (steps ?? []).map((c, i) => (c?.effect === "host-split" ? i : -1)).filter((i) => i >= 0);
+    if (!splitIdx.length) continue;
+    if (chapterId !== firstChapter) {
+      findings.push({ rule: "host-split-scope", severity: "error", detail: `${chapterId} 出现 host-split——钩子分屏只允许在第一章开头` });
+    } else if (splitIdx[0] !== 0 || splitIdx.some((v, i) => v !== i)) {
+      findings.push({ rule: "host-split-prefix", severity: "error", detail: `host-split 必须是第一章从第 1 步起的连续段（实际在第 ${splitIdx.map((i) => i + 1).join(",")} 步）` });
     }
   }
   if (hostFullTotal > HOST_FULL_PER_WORK) {
