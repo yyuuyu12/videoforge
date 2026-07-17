@@ -37,6 +37,7 @@ const PARK_THRESHOLD = 0.2;
  */
 export function AvatarPresenter({ getAudioEl, globalStep, audioSources, hostMode = "none" }: Props) {
   const videoRef = useRef<HTMLVideoElement | null>(null);
+  const blurRef = useRef<HTMLVideoElement | null>(null);
   const [durations, setDurations] = useState<number[]>(() =>
     audioSources.map(() => 0),
   );
@@ -96,6 +97,19 @@ export function AvatarPresenter({ getAudioEl, globalStep, audioSources, hostMode
           if (!video.paused) video.pause();
           if (Math.abs(drift) > PARK_THRESHOLD) video.currentTime = target;
         }
+        // 全屏模式的模糊填充背景：同一套"播放+微调"跟随，模糊层允许更松的精度
+        const blur = blurRef.current;
+        if (blur && blur.readyState >= 1) {
+          const blurDrift = blur.currentTime - target;
+          if (audioPlaying) {
+            if (Math.abs(blurDrift) > HARD_SEEK_THRESHOLD) { blur.currentTime = target; blur.playbackRate = 1; }
+            else blur.playbackRate = Math.min(1.1, Math.max(0.9, 1 - blurDrift * 0.5));
+            if (blur.paused) void blur.play().catch(() => {});
+          } else {
+            if (!blur.paused) blur.pause();
+            if (Math.abs(blurDrift) > PARK_THRESHOLD) blur.currentTime = target;
+          }
+        }
       }
       frameId = requestAnimationFrame(sync);
     };
@@ -105,21 +119,36 @@ export function AvatarPresenter({ getAudioEl, globalStep, audioSources, hostMode
   }, [durations, getAudioEl, globalStep]);
 
   return (
-    <aside
-      className={`avatar-presenter avatar-presenter--${AVATAR_CONFIG.position}${
-        hostMode !== "none" ? ` avatar-presenter--host-${hostMode}` : ""
-      }`}
-      data-no-advance
-      aria-label="讲师"
-    >
-      <video
-        ref={videoRef}
-        className="avatar-presenter__video"
-        src={`${import.meta.env.BASE_URL}avatar/lipsync.mp4`}
-        muted
-        playsInline
-        preload="auto"
-      />
-    </aside>
+    <>
+      {/* 开场全屏：同源模糊填充背景（竖幅素材配横屏舞台的标准美化） */}
+      {hostMode === "full" && (
+        <div className="avatar-blurfill" aria-hidden="true">
+          <video
+            ref={blurRef}
+            className="avatar-blurfill__video"
+            src={`${import.meta.env.BASE_URL}avatar/lipsync.mp4`}
+            muted
+            playsInline
+            preload="auto"
+          />
+        </div>
+      )}
+      <aside
+        className={`avatar-presenter avatar-presenter--${AVATAR_CONFIG.position}${
+          hostMode !== "none" ? ` avatar-presenter--host-${hostMode}` : ""
+        }`}
+        data-no-advance
+        aria-label="讲师"
+      >
+        <video
+          ref={videoRef}
+          className="avatar-presenter__video"
+          src={`${import.meta.env.BASE_URL}avatar/lipsync.mp4`}
+          muted
+          playsInline
+          preload="auto"
+        />
+      </aside>
+    </>
   );
 }

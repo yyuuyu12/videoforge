@@ -19,7 +19,9 @@ export const ZOOM_MIN = 1.1;
 export const ZOOM_MAX = 3.0; // 大开大合：博主级 2-3 倍特写（2026-07-17 用户定稿）
 /** focus 的 zoom 下限：1.4 以下肉眼几乎不可见（job-24 实测 1.12 = 观感"没效果"）。 */
 export const FOCUS_ZOOM_MIN = 1.4;
-export const MOVES_PER_CHAPTER = 3;
+// 密度档位（2026-07-17 用户定稿：默认密集，向知识类博主的效果密度靠拢）
+export const DENSITY_BUDGETS = { restrained: 2, standard: 3, dense: 4 };
+export const MOVES_PER_CHAPTER = 3; // 兼容旧调用的缺省值
 export const HOSTS_PER_CHAPTER = 1;
 export const HOST_FULL_PER_WORK = 1;
 
@@ -35,7 +37,8 @@ export function readCameraRegistry(presDir) {
   }
 }
 
-export function validateCameraCues(presDir) {
+export function validateCameraCues(presDir, { density = "dense" } = {}) {
+  const movesPerChapter = DENSITY_BUDGETS[density] ?? MOVES_PER_CHAPTER;
   const cues = readCameraRegistry(presDir);
   const findings = [];
   if (cues === null) return { pass: true, errors: 0, warnings: 0, findings };
@@ -68,8 +71,8 @@ export function validateCameraCues(presDir) {
         findings.push({ rule: "camera-zoom-weak", severity: "error", detail: `${where} focus zoom=${cue.zoom} 低于 ${FOCUS_ZOOM_MIN}——肉眼几乎不可见，等于没推（要轻推近用 pan）` });
       }
     });
-    if (moves > MOVES_PER_CHAPTER) {
-      findings.push({ rule: "camera-budget", severity: "error", detail: `${chapterId} 共 ${moves} 个内容镜头，超出每章 ${MOVES_PER_CHAPTER} 个预算——镜头为讲解服务，不是炫技` });
+    if (moves > movesPerChapter) {
+      findings.push({ rule: "camera-budget", severity: "error", detail: `${chapterId} 共 ${moves} 个内容镜头，超出每章 ${movesPerChapter} 个预算（档位 ${density}）——镜头为讲解服务，不是炫技` });
     }
     if (hosts > HOSTS_PER_CHAPTER) {
       findings.push({ rule: "host-budget", severity: "error", detail: `${chapterId} 共 ${hosts} 个讲述者时刻，超出每章 ${HOSTS_PER_CHAPTER} 个` });

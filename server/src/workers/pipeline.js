@@ -82,7 +82,9 @@ async function advance(jobId) {
             if (lint.errors > 0) {
               throw new Error(`静态规则 ${lint.errors} 处违规：${lintEvidence(lint, 3).join("；")}（确定性检查，重试本环节会重新生成）`);
             }
-            const camera = validateCameraCues(join(getJob(jobId).workspace, "presentation"));
+            let cameraDensity = "dense";
+            try { cameraDensity = JSON.parse(getJob(jobId).meta || "{}").camera?.density || "dense"; } catch {}
+            const camera = validateCameraCues(join(getJob(jobId).workspace, "presentation"), { density: cameraDensity });
             if (!camera.pass) {
               recordQualityEntry({ kind: "camera-check", jobId, errors: camera.errors, defects: { "camera-violation": camera.errors } });
               throw new Error(`镜头声明 ${camera.errors} 处违规：${cameraEvidence(camera, 3).join("；")}（确定性检查，重试本环节会重新生成）`);
