@@ -17,6 +17,8 @@ const EFFECTS = new Set(["focus", "pan", "spotlight", "overview", "host", "host-
 const CONTENT_MOVES = new Set(["focus", "pan", "spotlight"]);
 export const ZOOM_MIN = 1.1;
 export const ZOOM_MAX = 2.5;
+/** focus 的 zoom 下限：1.4 以下肉眼几乎不可见（job-24 实测 1.12 = 观感"没效果"）。 */
+export const FOCUS_ZOOM_MIN = 1.4;
 export const MOVES_PER_CHAPTER = 3;
 export const HOSTS_PER_CHAPTER = 1;
 export const HOST_FULL_PER_WORK = 1;
@@ -61,6 +63,9 @@ export function validateCameraCues(presDir) {
       if (cue.effect === "host-full") hostFullTotal += 1;
       if (cue.zoom != null && (cue.zoom < ZOOM_MIN || cue.zoom > ZOOM_MAX)) {
         findings.push({ rule: "camera-zoom", severity: "error", detail: `${where} zoom=${cue.zoom} 超出 [${ZOOM_MIN}, ${ZOOM_MAX}]` });
+      }
+      if (cue.effect === "focus" && cue.zoom != null && cue.zoom < FOCUS_ZOOM_MIN) {
+        findings.push({ rule: "camera-zoom-weak", severity: "error", detail: `${where} focus zoom=${cue.zoom} 低于 ${FOCUS_ZOOM_MIN}——肉眼几乎不可见，等于没推（要轻推近用 pan）` });
       }
     });
     if (moves > MOVES_PER_CHAPTER) {

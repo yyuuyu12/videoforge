@@ -491,7 +491,7 @@ const runners = {
       `- 首次生成必须满足 CHAPTER-CRAFT 的“首次生成质量契约”：先拆分超预算内容，不得依赖生成后的截图修复来补救拥挤、溢出、短标题三行或安全区冲突`,
       `- 动笔前先读 ${skill}/references/EXEMPLARS.md（真实作品首次验收 100 分的三个章节骨架）：安全区写死在容器、数据驱动 step、滚动窗口列表——借鉴骨架，内容原创`,
       `- 效果件按 CHAPTER-CRAFT「镜头与效果件」使用：镜头在 registry/cameraCues.ts 声明（每章 ≤3）、WordMark 跟读高亮（每屏 ≤2）、Counter 数字滚动、Annotate 圈注（每屏 ≤1）——只能用库里的件，违规会被确定性校验拦下`,
-      `- 启用数字人的作品建议：开场第一步声明 {effect:"host-full"}（全屏出镜再收进角落），章节转折/结尾用 {effect:"host"}（讲述者时刻，每章 ≤1）——该步画面保持极简`,
+      `- 效果采用度是硬要求（CHAPTER-CRAFT「采用度下限」）：数字人作品第一章第一步必须 {effect:"host-full"}、全片至少 1 个 host 时刻；内容镜头（focus/spotlight）总数至少为章节数一半，focus zoom ≥1.4；核心数字用 <Counter> 呈现——用得太保守观众等于没看到效果`,
       `- kicker 用 .title-label 一类的大标题样式，不要小号说明文字`,
       `- 每章完成后自己跑完工自检并修复 FAIL 项；全项目 npx tsc --noEmit 必须 0 错误`,
       `- 可以并行使用子任务加速，但最终交付要整体一致`,
