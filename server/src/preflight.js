@@ -1,5 +1,6 @@
 import { loadSettings, minimaxKey } from "./settings.js";
 import { health as heygemHealth } from "./heygem.js";
+import { frpcRunning } from "./servicesControl.js";
 
 /**
  * 依赖服务预检（用户需求：作品开工时就发现"服务没启动"，
@@ -23,9 +24,10 @@ async function pingHealth(baseUrl, timeoutMs = 4000) {
 
 export async function servicesStatus() {
   const settings = loadSettings();
-  const [heygem, asr] = await Promise.all([
+  const [heygem, asr, frpc] = await Promise.all([
     heygemHealth(),
     pingHealth(settings.asr.baseUrl || "http://127.0.0.1:8765"),
+    frpcRunning().catch(() => false),
   ]);
   return [
     {
@@ -55,6 +57,12 @@ export async function servicesStatus() {
       label: "语音识别（Whisper，仅抖音提取用）",
       ok: asr.ok,
       note: asr.ok ? `服务就绪（${asr.ms}ms）` : "未启动（不影响文章类作品）",
+    },
+    {
+      service: "frpc",
+      label: "公网隧道（frpc，仅远程调用需要）",
+      ok: frpc,
+      note: frpc ? "隧道进程在跑" : "未启动（本机使用不受影响）",
     },
   ];
 }

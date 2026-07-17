@@ -73,7 +73,7 @@ $env:HEYGEM_DIR='F:\other\ZHhinengti\aigc-human\python-modules\hdModule'
 
 ## 5. 使用顺序
 
-1. 启动 ASR、HeyGem，再启动 VideoForge。
+1. 启动 VideoForge，然后在**设置页顶部「模型服务」卡点「一键启动服务」**（HeyGem/ASR/frpc 全套，模型加载约 60-90 秒，状态灯变绿即可用）。不用时点「停止服务」释放显存内存。服务**不随开机自启**（2026-07-16 用户定稿；曾注册的 XiamuLocalServices 计划任务可双击 `F:\Projects\unregister-services-autostart.bat` 注销）。手动路径仍可用（§2/§3 的启动命令）。
 2. 设置页测试 LLM、MiniMax 和 HeyGem。
 3. 新建页选择内容来源。
 4. 抖音提取可离开页面；从历史记录查看进度和完整文案。

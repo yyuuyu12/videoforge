@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { api, type Settings as SettingsData, type TestResult } from "../api";
+import { api, type ServiceStatus, type Settings as SettingsData, type TestResult } from "../api";
 
 /**
  * 设置页 — M1 四张卡片：模型供应商 / MiniMax TTS / 声音克隆向导 / HeyGem 网关。
@@ -19,12 +19,95 @@ export function Settings() {
   return (
     <div>
       {msg && <div className="card error">{msg}</div>}
+      <ServicesCard />
       <DiagnosticsCard />
       <LlmCard s={s} onSaved={setS} />
       <SourcesCard s={s} onSaved={setS} />
       <MinimaxCard s={s} onSaved={setS} />
       <VoiceCloneCard s={s} onSaved={setS} />
       <HeygemCard s={s} onSaved={setS} />
+    </div>
+  );
+}
+
+// ---- ⓪ 服务控制：一键启停模型服务（不开机自启，按需启动省资源） ------------------
+function ServicesCard() {
+  const [list, setList] = useState<ServiceStatus[] | null>(null);
+  const [busy, setBusy] = useState<"start" | "stop" | "">("");
+  const [note, setNote] = useState("");
+  const pollRef = useRef<number | null>(null);
+
+  const refresh = () => api.servicesStatus().then(setList).catch(() => {});
+  useEffect(() => {
+    refresh();
+    return () => {
+      if (pollRef.current) window.clearInterval(pollRef.current);
+    };
+  }, []);
+
+  const startPolling = () => {
+    if (pollRef.current) window.clearInterval(pollRef.current);
+    let ticks = 0;
+    pollRef.current = window.setInterval(async () => {
+      ticks += 1;
+      const next = await api.servicesStatus().catch(() => null);
+      if (next) {
+        setList(next);
+        const heygem = next.find((x) => x.service === "heygem");
+        if (heygem?.ok || ticks > 36) {
+          if (pollRef.current) window.clearInterval(pollRef.current);
+          pollRef.current = null;
+          setBusy("");
+        }
+      }
+    }, 5000);
+  };
+
+  const onStart = async () => {
+    setBusy("start");
+    setNote("");
+    const r = await api.servicesStart().catch((e) => ({ ok: false, note: String(e.message) }));
+    setNote(r.note ?? "");
+    if (r.ok) startPolling();
+    else setBusy("");
+  };
+
+  const onStop = async () => {
+    setBusy("stop");
+    setNote("");
+    const r = await api.servicesStop().catch((e) => ({ ok: false, note: String(e.message) }));
+    setNote(r.note ?? "");
+    await refresh();
+    setBusy("");
+  };
+
+  return (
+    <div className="card">
+      <h3>模型服务（HeyGem 数字人 / 语音识别 / 公网隧道）</h3>
+      <p className="muted">
+        服务不随开机启动（省显存内存）。做数字人作品前点「启动服务」，模型加载约 60-90 秒；不用时可停止释放资源。
+      </p>
+      {list && (
+        <ul style={{ listStyle: "none", padding: 0, margin: "8px 0" }}>
+          {list.map((item) => (
+            <li key={item.service} style={{ margin: "4px 0" }}>
+              <span style={{ color: item.ok ? "#16a34a" : "#d97706" }}>{item.ok ? "●" : "○"}</span>{" "}
+              <strong>{item.label}</strong>
+              <span className="muted"> — {item.note}</span>
+            </li>
+          ))}
+        </ul>
+      )}
+      <div className="row">
+        <button disabled={busy !== ""} onClick={onStart}>
+          {busy === "start" ? "启动中（状态灯变绿即可用）…" : "一键启动服务"}
+        </button>
+        <button disabled={busy !== ""} onClick={onStop} className="secondary">
+          {busy === "stop" ? "停止中…" : "停止服务（释放资源）"}
+        </button>
+        <button disabled={busy !== ""} onClick={refresh} className="secondary">刷新状态</button>
+      </div>
+      {note && <p className="muted">{note}</p>}
     </div>
   );
 }

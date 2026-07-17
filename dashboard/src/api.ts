@@ -159,6 +159,13 @@ export interface TestResult {
   ms?: number;
 }
 
+export interface ServiceStatus {
+  service: string;
+  label: string;
+  ok: boolean;
+  note: string;
+}
+
 export interface AvatarAsset {
   id: string;
   filename: string;
@@ -448,6 +455,11 @@ export const api = {
       },
     ),
   heygemHealth: () => req<TestResult>("/heygem/health"),
+
+  // 依赖服务一键启停与状态
+  servicesStatus: () => req<ServiceStatus[]>("/services/status"),
+  servicesStart: () => req<{ ok: boolean; note?: string }>("/services/start", { method: "POST" }),
+  servicesStop: () => req<{ ok: boolean; note?: string; stopped?: string[] }>("/services/stop", { method: "POST" }),
 
   // content sources — M1
   searchTopics: (directions: string) =>

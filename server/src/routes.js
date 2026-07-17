@@ -15,6 +15,7 @@ import { testLlmConnection } from "./providers.js";
 import { cloneVoice, synthesize, testKey } from "./minimax.js";
 import { health as heygemHealth } from "./heygem.js";
 import { servicesStatus } from "./preflight.js";
+import { startServices, stopServices } from "./servicesControl.js";
 import { extractDouyin } from "./douyin.js";
 import { searchTopics } from "./search.js";
 import { classifyFeedback } from "./feedbackRouter.js";
@@ -412,13 +413,22 @@ api.get("/heygem/health", async (_req, res) => {
   res.json(await heygemHealth());
 });
 
-// 统一依赖服务状态：生成引擎 / 配音 / 数字人 / ASR（工作台与新建页预检用）
+// 统一依赖服务状态：生成引擎 / 配音 / 数字人 / ASR / 隧道（工作台与新建页预检用）
 api.get("/services/status", async (_req, res) => {
   try {
     res.json(await servicesStatus());
   } catch (err) {
     res.status(500).json({ error: err.message });
   }
+});
+
+// 一键启停模型服务（用户拍板：不开机自启，按需启动省资源）
+api.post("/services/start", async (_req, res) => {
+  res.json(await startServices());
+});
+
+api.post("/services/stop", async (_req, res) => {
+  res.json(await stopServices());
 });
 
 // ---- reusable avatar assets -------------------------------------------------
