@@ -6,7 +6,7 @@ import { db, getJob, logEvent, updateJob } from "./db.js";
 import { fetchArticleText, runDiscovery } from "./workers/discovery.js";
 import { approveGate, retryJob } from "./workers/pipeline.js";
 import { runFeedback, STAGES } from "./stages.js";
-import { previewStatus, startPreview, stopPreview } from "./preview.js";
+import { buildPresentation, previewStatus, startPreview, stopPreview } from "./preview.js";
 import { decodeUtf8OrGb18030 } from "./textEncoding.js";
 import { readRegistryChapterTitles } from "./chapterMetadata.js";
 import { auditPreviewQuality, renderJob } from "./render.js";
@@ -15,6 +15,7 @@ import { testLlmConnection } from "./providers.js";
 import { cloneVoice, synthesize, testKey } from "./minimax.js";
 import { health as heygemHealth } from "./heygem.js";
 import { servicesStatus } from "./preflight.js";
+import { choreographCameras } from "./cameraChoreographer.js";
 import { startServices, stopServices } from "./servicesControl.js";
 import { extractDouyin } from "./douyin.js";
 import { searchTopics } from "./search.js";
@@ -1181,6 +1182,25 @@ api.post("/jobs/:id/devserver/stop", (req, res) => {
 // ---- 服务端成片（无头浏览器 + ffmpeg） ------------------------------------------
 
 const renderingJobs = new Set();
+
+api.post("/jobs/:id/choreograph", async (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  let meta = {};
+  try { meta = JSON.parse(job.meta || "{}"); } catch {}
+  try {
+    const plan = await choreographCameras(
+      join(job.workspace, "presentation"),
+      `http://127.0.0.1:${config.port}/preview/${job.id}/`,
+      { density: meta.camera?.density || "dense", avatarEnabled: Boolean(meta.avatar?.enabled) },
+    );
+    await buildPresentation(job);
+    logEvent(job.id, "quality", `手动镜头编排完成：${Object.entries(plan.stats).map(([k, v]) => `${k}×${v}`).join(" ")}`);
+    res.json({ ok: true, ...plan });
+  } catch (err) {
+    res.status(500).json({ error: err.message });
+  }
+});
 
 api.post("/jobs/:id/render", (req, res) => {
   const job = getJob(Number(req.params.id));

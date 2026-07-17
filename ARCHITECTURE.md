@@ -189,6 +189,7 @@ skills/web-video-presentation/references/CHAPTER-CRAFT.md（镜头与效果件 +
 - 效果件 effects/：WordMark（跟读高亮，复用字幕 cue 时钟）、Counter、Annotate、
   QuoteCard（金句卡，全片≤2）、ChapterCard（章节转场卡）、Shine（扫光）、Slam（大数字重锤）。
   卡片类右侧内边距吃进 --stage-pad-x-end（数字人安全区），几何断言实测通过。
+- **确定性镜头编排器**（server/src/cameraChoreographer.js，2026-07-17）：chapter_gen 后无头走查每步真实 DOM，按信号（大数字/列表簇/主内容块）+ 手排同源规则（交替特写/聚光/呼吸 pan/密度下限/相邻不连强推/host 布点）自动产出 cameraCues.ts；AI 声明的镜头视为设计意图优先保留。**这是"AI 自动 = 手排质量"的机制保证**（用户核心要求）。手动重排：POST /api/jobs/:id/choreograph。job-23（自由 JSX 章节）实测 18 镜头、38 步走查 0 未命中。
 - 验收路径：cameraCheck 静态执法（pipeline chapter_gen 后）→ 运行时优雅降级 →
   结构/截图审计 → gate_chapters 人工预览。
 

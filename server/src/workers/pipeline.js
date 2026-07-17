@@ -7,6 +7,8 @@ import { auditPreviewQuality, inspectPreviewQuality } from "../render.js";
 import { defectSummary, recordQualityEntry } from "../qualityLedger.js";
 import { lintChapters, lintDefectSummary, lintEvidence } from "../chapterLint.js";
 import { cameraEvidence, validateCameraCues } from "../cameraCheck.js";
+import { choreographCameras } from "../cameraChoreographer.js";
+import { config } from "../config.js";
 import { preflightWarnings } from "../preflight.js";
 
 /**
@@ -83,7 +85,25 @@ async function advance(jobId) {
               throw new Error(`静态规则 ${lint.errors} 处违规：${lintEvidence(lint, 3).join("；")}（确定性检查，重试本环节会重新生成）`);
             }
             let cameraDensity = "dense";
-            try { cameraDensity = JSON.parse(getJob(jobId).meta || "{}").camera?.density || "dense"; } catch {}
+            let avatarEnabled = false;
+            try {
+              const meta = JSON.parse(getJob(jobId).meta || "{}");
+              cameraDensity = meta.camera?.density || "dense";
+              avatarEnabled = Boolean(meta.avatar?.enabled);
+            } catch {}
+            // 确定性镜头编排（2026-07-17：AI 自动 = 手排质量的保证）——
+            // 走查真实 DOM 按信号编排，AI 有意声明的镜头保留、机器补齐到下限
+            try {
+              const plan = await choreographCameras(
+                join(getJob(jobId).workspace, "presentation"),
+                `http://127.0.0.1:${config.port}/preview/${jobId}/`,
+                { density: cameraDensity, avatarEnabled },
+              );
+              logEvent(jobId, "quality", `镜头编排完成：${Object.entries(plan.stats).map(([k, v]) => `${k}×${v}`).join(" ")}（${plan.chapters} 章 ${plan.totalSteps} 步）`);
+              await buildPresentation(getJob(jobId)); // registry 变更需重建
+            } catch (choreoError) {
+              logEvent(jobId, "quality", `镜头编排未能运行（保留 AI 声明）：${choreoError.message}`, "warning");
+            }
             const camera = validateCameraCues(join(getJob(jobId).workspace, "presentation"), { density: cameraDensity });
             if (!camera.pass) {
               recordQualityEntry({ kind: "camera-check", jobId, errors: camera.errors, defects: { "camera-violation": camera.errors } });
