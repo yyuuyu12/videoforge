@@ -12,6 +12,19 @@
   will-change: transform;
 }
 
+/* 呼吸感微推（效果 v2a）：20s 一个来回、1.0→1.045，肉眼几乎察觉不到
+   "在动"，但画面永不死寂——知识类博主片的隐形生命感 */
+.camera-breath {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 42%;
+  animation: camera-breath 20s ease-in-out infinite alternate;
+}
+@keyframes camera-breath {
+  from { transform: scale(1); }
+  to { transform: scale(1.045); }
+}
+
 /* 数字人时刻的内容压暗层（App 渲染，位于画面之上、数字人之下） */
 .host-dim {
   position: absolute;

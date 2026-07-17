@@ -16,6 +16,11 @@
 | 跟读高亮 | `<WordMark word="收藏率"><span>收藏率</span></WordMark>`（from `../../components/effects/WordMark`） | 口播念到该词时自动点亮；**每屏 ≤2 处**；word 必须真实出现在本步 narration 里 |
 | 数字滚动 | `<Counter to={37} suffix="%" />` | 用于关键数据；同屏 ≤2 个 |
 | 手绘圈注 | `<Annotate kind="circle">37%</Annotate>` 或 `kind="underline"` | 包裹式，每屏 ≤1 处，圈最重要的一个点 |
+| 金句卡 | `<QuoteCard by="核心结论">流量奖励的是判断</QuoteCard>` 作某 step 整屏内容 | **全片 ≤2 张**，只给最值得截图传播的观点；该步 narration 就是这句话本身 |
+| 章节转场卡 | `<ChapterCard no={3} total={9} title="判断的落差" sub="一句预告"/>` 作章首 step 0 | 章多（≥6 章）时用，营造课程感；与 host 时刻不同屏 |
+| 扫光高亮 | `<Shine>关键短语</Shine>` | 每屏 ≤1 处；用在结论句关键词，不给普通正文 |
+| 大数字重锤 | `<Slam><Counter to={400} suffix="万"/></Slam>` | 每屏 ≤1 处；只给最有冲击力的那个数字 |
+| 呼吸感微推 | 自动生效（camera-breath 层），无需声明 | 全程 1.0→1.045/20s 往复——不要再叠加自己写的整屏缓推动画（会共振） |
 
 镜头准则：**镜头为讲解服务，不是炫技**——推近的时机应与 narration 讲到该元素的时机一致；
 被推近的区域内容要经得起放大（无小字、无瑕疵）；聚光适合"多元素里点名一个"，推近适合"细节值得看大"。

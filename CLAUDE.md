@@ -20,7 +20,11 @@ npm run server / npm run dashboard          # 开发：API :5401 + Vite :5400
 - `server/src/agentRunner.js` — 生成引擎三路径：订阅模式走 Claude Agent SDK（主）→ `claude -p`（兜底）；API 模式走 OpenAI 兼容工具循环
 - `server/src/douyin.js` — TikHub、原声选择、Whisper、完整性校验
 - `server/src/devServers.js` — 按作品分配 :5300-5399 预览端口
-- `dashboard/src/pages/Workbench.tsx` — 七阶段工作台；`NewWork.tsx` 内容入口；`Settings.tsx` 服务配置
+- **质量线四件**：`chapterLint.js`（章节静态执法：字号/写死颜色/超长文本）、`subtitleCheck.js`（字幕契约：≤10 字/时间递增/尾标点）、`cameraCheck.js`（镜头声明：词表/倍率/密度档位预算）、`qualityLedger.js`（质量账本 JSONL + 回写铁律统计）
+- **对话修改三件**：`feedbackRouter.js`（意图路由：同步类→重跑管线不进 Agent）、`feedbackTransaction.js`（受保护事务：快照/白名单/门禁对比/自动回滚）、agentRunner 的 feedbackEngine 选路
+- **运维两件**：`preflight.js`（依赖服务状态与开工预警）、`servicesControl.js`（模型服务一键启停，设置页按钮）
+- **效果系统**（模板层，见 skills 模板 `src/components/`）：`CameraLayer`（镜头四原语+magnify+呼吸微推层）、`AvatarPresenter`（播放+微调同步、host/host-full 数字人时刻、全屏模糊填充）、`effects/`（WordMark 跟读高亮、Counter、Annotate、QuoteCard 金句卡、ChapterCard 章节转场卡、Shine 扫光、Slam 大数字重锤）；声明入口 `registry/cameraCues.ts`
+- `dashboard/src/pages/Workbench.tsx` — 七阶段工作台；`NewWork.tsx` 内容入口；`Settings.tsx` 服务配置（含模型服务启停卡）
 - `skills/` — 随仓库提交的方法论快照（产品 prompt 的真源，见下"skills 规则"）
 
 ## 流水线与数据

@@ -115,7 +115,9 @@ export function CameraLayer({ chapterId, step, children }: Props) {
   return (
     <div className="camera-viewport">
       <div ref={layerRef} className="camera-layer">
-        {children}
+        {/* 呼吸感微推（效果 v2a）：全程 1.0→1.045 极缓往复，画面永不完全静止。
+            与镜头变换嵌套复合——推近时呼吸仍在，博主片的"隐形生命感"。 */}
+        <div className="camera-breath">{children}</div>
       </div>
       <div ref={spotRef} className="camera-spotlight" aria-hidden="true" />
     </div>
