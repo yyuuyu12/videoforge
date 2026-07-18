@@ -644,19 +644,22 @@ const runners = {
     const merged = join(avatarDir, "narration.mp3");
     const merge = await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-c:a", "libmp3lame", merged], presDir, job.id, "avatar_media");
     if (!merge.ok) return merge;
-    // HeyGem 服务端用 cv2 逐帧读上传的视频，HEVC/H.265 源会让 VideoCapture.read
-    // 直接抛异常（job#11 实测：推理到 28% 崩）。非 H.264 源先转码，结果缓存复用。
-    let uploadPath = source;
-    const codec = await videoCodec(source).catch(() => "unknown");
-    if (codec !== "h264") {
-      const normalized = join(avatarDir, `presenter-${sourceFingerprint.slice(0, 16)}-h264.mp4`);
-      if (!existsSync(normalized)) {
-        avatarProgress(job.id, 9, `出镜视频编码为 ${codec}，正在转码为 HeyGem 兼容的 H.264`);
-        const trans = await sh("ffmpeg", ["-y", "-i", source, "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", normalized], presDir, job.id, "avatar_media");
-        if (!trans.ok) return trans;
-      }
-      uploadPath = normalized;
+    // HeyGem 上传源统一规范化（2026-07-18 定稿，job-27 实翻车根治）：
+    //   ① 转 H.264 —— cv2 逐帧读 HEVC/H.265 会抛异常（job#11：推理 28% 崩）
+    //   ② 长边降到 ≤1280 —— HeyGem 按源分辨率逐帧推理，2.5K 竖屏源（751=
+    //      1440×2560）× 长音频循环，帧数×高分辨率在 28% 把 GPU 显存吃爆
+    //      （job-27 两次卡死/OOM 于 28%）。成片数字人窗仅 277×493px，降到
+    //      720p 推理零可见损失、显存砍 ~75%。按源指纹缓存，只转一次。
+    const normalized = join(avatarDir, `presenter-${sourceFingerprint.slice(0, 16)}-h264-1280.mp4`);
+    if (!existsSync(normalized)) {
+      const codec = await videoCodec(source).catch(() => "unknown");
+      avatarProgress(job.id, 9, `规范化出镜视频（${codec}→H.264，长边≤1280，降低推理显存）`);
+      // 长边 ≤1280 保比例，偶数尺寸；横屏卡宽、竖屏卡高
+      const scale = "scale='if(gte(iw,ih),min(1280,iw),-2)':'if(gte(iw,ih),-2,min(1280,ih))'";
+      const trans = await sh("ffmpeg", ["-y", "-i", source, "-vf", scale, "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", normalized], presDir, job.id, "avatar_media");
+      if (!trans.ok) return trans;
     }
+    const uploadPath = normalized;
     avatarProgress(job.id, 12, "配音合并完成，正在上传模型");
     const submitted = await submitJob({
       audioB64: readFileSync(merged).toString("base64"),
