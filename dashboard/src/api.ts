@@ -353,6 +353,8 @@ export const api = {
   approve: (id: number) => req(`/jobs/${id}/approve`, { method: "POST" }),
   approveChapter: (id: number, chapter: string) =>
     req(`/jobs/${id}/chapters/${encodeURIComponent(chapter)}/approve`, { method: "POST" }),
+  approveAllChapters: (id: number) =>
+    req<{ ok: boolean; approved: number }>(`/jobs/${id}/chapters/approve-all`, { method: "POST" }),
   retry: (id: number, stage?: string) =>
     req(`/jobs/${id}/retry`, {
       method: "POST",

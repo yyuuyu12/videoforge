@@ -1024,13 +1024,26 @@ export function Workbench({
               </a>
             )}
             {job.stage === "gate_chapters" && (
-              <button
-                className="vf-primary"
-                disabled={!allChaptersApproved || busy}
-                onClick={() => api.approve(job.id).then(load)}
-              >
-                {allChaptersApproved ? "全部画面通过，进入配音" : `还需确认 ${chapterGeneration.chapters.length - chapterGeneration.approved} 章`}
-              </button>
+              allChaptersApproved ? (
+                <button
+                  className="vf-primary"
+                  disabled={busy}
+                  onClick={() => api.approve(job.id).then(load)}
+                >
+                  全部画面通过，进入配音
+                </button>
+              ) : (
+                <button
+                  className="vf-primary"
+                  disabled={busy || chapterGeneration.chapters.some((c) => !c.ready)}
+                  onClick={() => api.approveAllChapters(job.id).then(load)}
+                  title="确认全部已生成章节并直接进入配音，无需逐章点击"
+                >
+                  {chapterGeneration.chapters.some((c) => !c.ready)
+                    ? `还有章节在生成中…`
+                    : `一键确认全部 ${chapterGeneration.chapters.length} 章并进入配音`}
+                </button>
+              )
             )}
           </div>
           {previewError && <p className="vf-inline-error">预览启动失败：{previewError}</p>}

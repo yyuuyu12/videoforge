@@ -1003,6 +1003,28 @@ api.post("/jobs/:id/chapters/:chapter/approve", (req, res) => {
   res.json({ ok: true, chapter, chapterGeneration: chapterGeneration(job) });
 });
 
+// 一键确认全部章节并进入下一步（用户需求 2026-07-18：逐页太慢）
+api.post("/jobs/:id/chapters/approve-all", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  if (job.stage !== "gate_chapters" || job.status !== "waiting_approval") {
+    return res.status(409).json({ error: "画面尚未进入章节验收，暂时不能确认" });
+  }
+  const generation = chapterGeneration(job);
+  const notReady = generation.chapters.filter((c) => !c.ready);
+  if (!generation.chapters.length || notReady.length) {
+    return res.status(409).json({ error: `还有 ${notReady.length || 1} 章未生成完成，暂时不能全部确认` });
+  }
+  const stmt = db.prepare(`
+    INSERT INTO chapter_reviews (job_id, chapter_key, status) VALUES (?, ?, 'approved')
+    ON CONFLICT(job_id, chapter_key) DO UPDATE SET status = 'approved', updated_at = datetime('now')
+  `);
+  for (const c of generation.chapters) stmt.run(job.id, c.key);
+  logEvent(job.id, "gate_chapters", `一键确认全部 ${generation.chapters.length} 章`);
+  const advanced = approveGate(job.id); // 直接推进到配音阶段
+  res.json({ ok: advanced, approved: generation.chapters.length });
+});
+
 api.post("/jobs/:id/retry", (req, res) => {
   res.json({ ok: retryJob(Number(req.params.id), req.body?.stage) });
 });
