@@ -83,17 +83,22 @@ function extractSignalsInPage() {
   }
 
   // 信号三：主内容块（h1 的最近块容器，pan 呼吸目标）
+  // 信号四：主标题 h1 本身（强 focus 目标——没大数字时的特写担当）
   let copy = null;
+  let heading = null;
   const h1 = [...root.querySelectorAll("h1")].find(visible);
   if (h1) {
     const container = h1.closest("div, main, section") || h1;
     copy = { path: pathOf(container === root ? h1 : container) };
+    const hr = h1.getBoundingClientRect();
+    if (hr.width >= 40 && hr.height >= 30) heading = { path: pathOf(h1) };
   }
 
   return {
     numeric: numeric?.path ?? null,
     list: list?.path ?? null,
     copy: copy?.path ?? null,
+    heading: heading?.path ?? null,
   };
 }
 
@@ -184,6 +189,20 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
       moves += 1;
       break;
     }
+    // 每章保底一个强特写（2026-07-18）：本章还没有 magnify/focus/spotlight
+    // 且不是纯 host 开场章时，focus 主标题 2.0×——根治"全是软 pan 没 punch"
+    //（job-26 实测：无大数字的章全退化成 1.25 轻推，观感平）。
+    const hasStrong = () => arr.some((c) => c && (c.effect === "magnify" || c.effect === "focus" || c.effect === "spotlight"));
+    const hasOpeningHost = arr.some((c) => c && (c.effect === "host-full" || c.effect === "host-split"));
+    if (!hasStrong() && !hasOpeningHost && moves < cap) {
+      for (let si = 0; si < stepCount; si++) {
+        if (arr[si] || !signals[ci][si]?.heading || !canStrong(si)) continue;
+        if (ci === 0 && si === 0 && avatarEnabled) continue;
+        arr[si] = { effect: "focus", target: signals[ci][si].heading, zoom: 2.0 };
+        strongAt.add(si); moves += 1;
+        break;
+      }
+    }
     // 呼吸 pan 补到下限
     for (let si = 1; si < stepCount - 1 && moves < Math.max(floor, 2) && moves < cap; si++) {
       if (arr[si] || !signals[ci][si]?.copy || !canStrong(si)) continue;
@@ -192,6 +211,35 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
     }
     cues[id] = arr;
   });
+
+  // 全局打断长平淡游程（2026-07-18）：连续 >6 步无强效果（magnify/focus/
+  // spotlight/host*）就在游程中段注入一个 focus，根治"12 步一路平"（job-26）。
+  const STRONG_EFF = new Set(["magnify", "focus", "spotlight", "host", "host-full", "host-split"]);
+  const flatRef = []; // {ci, si}
+  order.forEach((id, ci) => { for (let si = 0; si < steps[ci]; si++) flatRef.push({ ci, si }); });
+  let flatRun = 0;
+  for (let g = 0; g < flatRef.length; g++) {
+    const { ci, si } = flatRef[g];
+    const eff = cues[order[ci]][si]?.effect;
+    if (eff && STRONG_EFF.has(eff)) { flatRun = 0; continue; }
+    flatRun++;
+    if (flatRun > 5) {
+      const arr = cues[order[ci]];
+      const neighborStrong = (arr[si - 1] && STRONG_EFF.has(arr[si - 1].effect)) || (arr[si + 1] && STRONG_EFF.has(arr[si + 1].effect));
+      if (!neighborStrong) {
+        if (arr[si] && arr[si].effect === "pan" && arr[si].target) {
+          // 已有软 pan：直接升级成 focus（零成本，同时消游程+加 punch）
+          arr[si] = { effect: "focus", target: arr[si].target, zoom: 2.0 };
+          flatRun = 0;
+        } else if (!arr[si]) {
+          // 空步：按信号注入 focus（heading/copy）
+          const sig = signals[ci][si];
+          const tgt = sig?.heading || sig?.copy;
+          if (tgt) { arr[si] = { effect: "focus", target: tgt, zoom: 2.0 }; flatRun = 0; }
+        }
+      }
+    }
+  }
 
   // 数字人时刻布点（AI 未布时机器兜底）
   if (avatarEnabled && order.length) {

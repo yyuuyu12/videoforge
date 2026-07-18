@@ -139,8 +139,26 @@ score = Math.max(0, score);
 if (thinChapters.length) defects.push(`${thinChapters.length} 章镜头密度<2：${thinChapters.join(",")}`);
 if (misses) defects.push(`镜头未命中 ${misses} 次`);
 
+// ---- 高阶表现力维度（2026-07-18：从"不出错"→"够博主水准"）----
+// 强效果 = magnify/focus/spotlight/host*（真正抓眼球的），pan/none 算平淡。
+const STRONG = new Set(["magnify", "focus", "spotlight", "host", "host-full", "host-split"]);
+const effSeq = perStep.map((s) => s.effect);
+const strongCount = effSeq.filter((e) => STRONG.has(e)).length;
+const strongRatio = total ? strongCount / total : 0;
+// 全片强推近（magnify/focus）数——博主片的"暴力特写"担当，太少则平
+const punchCount = effSeq.filter((e) => e === "magnify" || e === "focus").length;
+// 最长平淡游程（连续无强效果的步数）
+let run = 0, maxFlatRun = 0;
+for (const e of effSeq) { if (STRONG.has(e)) run = 0; else { run++; maxFlatRun = Math.max(maxFlatRun, run); } }
+
+// 表现力扣分
+if (strongRatio < 0.28) { const pen = Math.round((0.28 - strongRatio) * 60); score -= pen; defects.push(`强效果占比仅 ${(strongRatio * 100).toFixed(0)}%（<28%，画面偏平，扣${pen}）`); }
+if (punchCount < Math.max(2, Math.ceil(order.length * 0.4))) { const need = Math.max(2, Math.ceil(order.length * 0.4)); const pen = (need - punchCount) * 5; score -= pen; defects.push(`强推近(magnify/focus)仅 ${punchCount} 个（应≥${need}，缺博主式特写，扣${pen}）`); }
+if (maxFlatRun > 6) { const pen = (maxFlatRun - 6) * 3; score -= pen; defects.push(`最长平淡游程 ${maxFlatRun} 步（>6 连续无强效果，观感平淡，扣${pen}）`); }
+score = Math.max(0, score);
+
 console.log(JSON.stringify({
   jobId, score,
-  dimensions: { cutCount, offstage, emptyAvatar: emptyAv, subtitleTooLong: subLong, weakZoom, cameraMisses: misses, thinChapters: thinChapters.length, contentMoves, totalSteps: total, chapters: order.length },
+  dimensions: { cutCount, offstage, emptyAvatar: emptyAv, subtitleTooLong: subLong, weakZoom, cameraMisses: misses, thinChapters: thinChapters.length, contentMoves, totalSteps: total, chapters: order.length, strongRatio: Number(strongRatio.toFixed(2)), punchCount, maxFlatRun },
   defects,
 }));
