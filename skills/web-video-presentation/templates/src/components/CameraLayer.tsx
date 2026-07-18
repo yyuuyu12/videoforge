@@ -91,55 +91,42 @@ export function CameraLayer({ chapterId, step, children }: Props) {
         return;
       }
 
-      // 取景框切字守卫（job-25 实翻车："2015"被切成"015"、标题切半）：
-      // 收集可见文字块的本地矩形，若取景框边缘从中间切过任何文字，
-      // 逐级降倍率重试；降到 1.35 仍切则放弃推近、改用聚光。
-      const textRects: { l: number; r: number; t: number; b: number }[] = [];
-      for (const node of Array.from(layer.querySelectorAll<HTMLElement>("*"))) {
-        if (node.children.length > 0) continue;
-        const text = (node.textContent || "").trim();
-        if (text.length < 2) continue;
-        const cs = getComputedStyle(node);
-        if (parseFloat(cs.fontSize) < 18 || cs.visibility === "hidden" || Number(cs.opacity) < 0.1) continue;
-        const rr = node.getBoundingClientRect();
-        if (rr.width < 10 || rr.height < 10) continue;
-        textRects.push({
-          l: (rr.left - layerRect.left) / scale0,
-          r: (rr.right - layerRect.left) / scale0,
-          t: (rr.top - layerRect.top) / scale0,
-          b: (rr.bottom - layerRect.top) / scale0,
-        });
-      }
+      // 取景框守卫（job-25 实翻车："2015"被切成"015"）：只保证**目标自身**
+      // 完整落在取景框内，不管画面上其他不相关文字（页眉/页脚/序号这类
+      // 离目标很远的小字，推近时被排除在画面外是正常的，不是缺陷）。
+      // 2026-07-17 用户拍板纠偏：上一版扫全画面文字，页眉页脚被框边擦到
+      // 就整体判定"切字"→逐级降档→兜底聚光，结果是全片放大缩小被废掉，
+      // 换成一堆和叙事无关的忽亮忽暗——这是绕路，不是修复，已撤销。
+      const targetLocal = {
+        l: (t.left - layerRect.left) / scale0,
+        r: (t.right - layerRect.left) / scale0,
+        top: (t.top - layerRect.top) / scale0,
+        bot: (t.bottom - layerRect.top) / scale0,
+      };
+      const MARGIN = 12; // 目标四周留白，纯视觉呼吸感，不是安全区判定
       const frameFor = (z: number) => {
         const fx = Math.min(0, Math.max(W - z * W, W / 2 - z * cx));
         const fy = Math.min(0, Math.max(H - z * H, H / 2 - z * cy));
         return { fx, fy, vx0: -fx / z, vx1: (-fx + W) / z, vy0: -fy / z, vy1: (-fy + H) / z };
       };
-      const cutsText = (z: number) => {
+      const targetFits = (z: number) => {
         const { vx0, vx1, vy0, vy1 } = frameFor(z);
-        const EDGE = 10; // 允许贴边 10px 内的裁切余量
-        return textRects.some((rect) => {
-          const overlaps = rect.r > vx0 && rect.l < vx1 && rect.b > vy0 && rect.t < vy1;
-          if (!overlaps) return false;
-          const cutX = (rect.l < vx0 - EDGE && rect.r > vx0 + EDGE) || (rect.r > vx1 + EDGE && rect.l < vx1 - EDGE);
-          const cutY = (rect.t < vy0 - EDGE && rect.b > vy0 + EDGE) || (rect.b > vy1 + EDGE && rect.t < vy1 - EDGE);
-          return cutX || cutY;
-        });
+        return (
+          targetLocal.l - MARGIN >= vx0 &&
+          targetLocal.r + MARGIN <= vx1 &&
+          targetLocal.top - MARGIN >= vy0 &&
+          targetLocal.bot + MARGIN <= vy1
+        );
       };
-      let zoom = clampZoom(cue);
-      while (zoom >= 1.35 && cutsText(zoom)) zoom = Math.round((zoom - 0.15) * 100) / 100;
+      // 目标本身的最大可行倍率（宽高两个维度的瓶颈取更小值）
+      const targetMaxZoom = Math.min(
+        W / (targetLocal.r - targetLocal.l + MARGIN * 2),
+        H / (targetLocal.bot - targetLocal.top + MARGIN * 2),
+      );
+      let zoom = Math.min(clampZoom(cue), Math.max(1.05, targetMaxZoom));
+      // 边缘钳制可能仍让目标贴边溢出（目标离画面边界很近时）：小步降档到贴合
+      while (zoom > 1.05 && !targetFits(zoom)) zoom = Math.round((zoom - 0.1) * 100) / 100;
       layer.style.transition = prevTransition;
-      if (zoom < 1.35) {
-        // 推近做不到不切字：退化为聚光（同一 target，注意力效果保留）
-        const rx = Math.max(t.width, 120) / scale0 * 0.72;
-        const ry = Math.max(t.height, 120) / scale0 * 0.72;
-        spot.style.setProperty("--spot-x", `${(cx / W) * 100}%`);
-        spot.style.setProperty("--spot-y", `${(cy / H) * 100}%`);
-        spot.style.setProperty("--spot-rx", `${rx}px`);
-        spot.style.setProperty("--spot-ry", `${ry}px`);
-        spot.style.opacity = "1";
-        return;
-      }
       const { fx: tx, fy: ty } = frameFor(zoom);
       layer.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${zoom})`;
       if (cue.effect === "magnify") {
