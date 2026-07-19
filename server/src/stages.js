@@ -639,61 +639,87 @@ const runners = {
     }
     const service = await heygemHealth();
     if (!service.ok || !service.ready) return { ok: false, note: "HeyGem 服务未启动或模型未就绪，请先在设置中确认数字人服务状态" };
-    const concatFile = join(avatarDir, "audio-list.txt");
-    writeFileSync(concatFile, files.map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n"));
-    const merged = join(avatarDir, "narration.mp3");
-    const merge = await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", concatFile, "-c:a", "libmp3lame", merged], presDir, job.id, "avatar_media");
-    if (!merge.ok) return merge;
     // HeyGem 上传源统一规范化（2026-07-18 定稿，job-27 实翻车根治）：
     //   ① 转 H.264 —— cv2 逐帧读 HEVC/H.265 会抛异常（job#11：推理 28% 崩）
-    //   ② 长边降到 ≤1280 —— HeyGem 按源分辨率逐帧推理，2.5K 竖屏源（751=
-    //      1440×2560）× 长音频循环，帧数×高分辨率在 28% 把 GPU 显存吃爆
-    //      （job-27 两次卡死/OOM 于 28%）。成片数字人窗仅 277×493px，降到
-    //      720p 推理零可见损失、显存砍 ~75%。按源指纹缓存，只转一次。
+    //   ② 长边降到 ≤1280 —— HeyGem 按源分辨率逐帧推理，高分辨率×长音频循环
+    //      会把 GPU 显存吃爆。成片数字人窗仅 277×493px，降 720p 零可见损失。
     const normalized = join(avatarDir, `presenter-${sourceFingerprint.slice(0, 16)}-h264-1280.mp4`);
     if (!existsSync(normalized)) {
       const codec = await videoCodec(source).catch(() => "unknown");
       avatarProgress(job.id, 9, `规范化出镜视频（${codec}→H.264，长边≤1280，降低推理显存）`);
-      // 长边 ≤1280 保比例，偶数尺寸；横屏卡宽、竖屏卡高
       const scale = "scale='if(gte(iw,ih),min(1280,iw),-2)':'if(gte(iw,ih),-2,min(1280,ih))'";
       const trans = await sh("ffmpeg", ["-y", "-i", source, "-vf", scale, "-c:v", "libx264", "-preset", "fast", "-crf", "20", "-pix_fmt", "yuv420p", "-an", normalized], presDir, job.id, "avatar_media");
       if (!trans.ok) return trans;
     }
     const uploadPath = normalized;
-    avatarProgress(job.id, 12, "配音合并完成，正在上传模型");
-    const submitted = await submitJob({
-      audioB64: readFileSync(merged).toString("base64"),
-      videoB64: readFileSync(uploadPath).toString("base64"),
-      videoFmt: uploadPath.toLowerCase().endsWith(".mov") ? "mov" : "mp4",
-    });
-    avatarProgress(job.id, 18, "HeyGem 已接收任务，开始口型推理");
-    let lastProgress = -1;
-    for (let i = 0; i < 360; i += 1) {
-      const state = await taskStatus(submitted.taskId);
-      const progress = Number(state.progress ?? 0);
-      if (progress >= lastProgress + 5) {
-        lastProgress = progress;
-        avatarProgress(job.id, 18 + progress * 0.68, `模型推理 ${Math.min(100, Math.round(progress))}%`);
-      }
-      if (state.status === "done") {
-        avatarProgress(job.id, 88, "模型完成，正在下载数字人视频");
-        const rawLipsync = join(avatarDir, "lipsync-raw.mp4");
-        writeFileSync(rawLipsync, await downloadResult(submitted.taskId));
-        // HeyGem 输出关键帧间隔 10s，浏览器 seek 要从关键帧起解码、卡成幻灯片
-        //（job-20 实测）；重编码为 1s 关键帧让换步/换章 seek 瞬间完成。
-        avatarProgress(job.id, 89, "正在优化关键帧间隔（流畅换页）");
-        const gop = await sh("ffmpeg", ["-y", "-i", rawLipsync, "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-g", "25", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-c:a", "copy", lipsync], presDir, job.id, "avatar_media");
-        if (!gop.ok) return gop;
-        rmSync(rawLipsync, { force: true });
-        writeJson(markerPath, { fingerprint, sourceFingerprint, generatedAt: new Date().toISOString() });
-        const split = await splitAvatarPreviews(job, files, lipsync, avatarDir, presDir);
-        if (!split.ok) return split;
-        return { ok: true, note: "数字人媒体生成完成，进入接线" };
-      }
-      if (state.status === "error") return { ok: false, note: state.error || "数字人生成失败" };
-      await new Promise((resolve) => setTimeout(resolve, 5000));
+
+    // —— 分段推理（2026-07-18 根治：16GB 显卡单次整段推理在逐帧生成阶段
+    //    显存踩线卡死，job-27 4 次卡 28%）。按 ≤120s 在配音段边界切块，逐块
+    //    独立推理（每块帧数减半→峰值显存减半），再按序拼接。块边界落在句子
+    //    边界，硬切等于自然剪辑点。也是远程 HeyGem 多用户的必需能力。
+    const CHUNK_MAX_SEC = 120;
+    const durs = [];
+    for (const f of files) durs.push(await mediaDuration(f).catch(() => 3));
+    const chunks = [];
+    let cur = [], curDur = 0;
+    for (let i = 0; i < files.length; i += 1) {
+      if (cur.length && curDur + durs[i] > CHUNK_MAX_SEC) { chunks.push(cur); cur = []; curDur = 0; }
+      cur.push(files[i]); curDur += durs[i];
     }
-    return { ok: false, note: "数字人生成超时，可直接重试本环节" };
+    if (cur.length) chunks.push(cur);
+
+    const videoB64 = readFileSync(uploadPath).toString("base64");
+    const videoFmt = uploadPath.toLowerCase().endsWith(".mov") ? "mov" : "mp4";
+    const chunkRaws = [];
+    for (let ci = 0; ci < chunks.length; ci += 1) {
+      const clist = join(avatarDir, `chunk-${ci}-list.txt`);
+      writeFileSync(clist, chunks[ci].map((p) => `file '${p.replace(/'/g, "'\\''")}'`).join("\n"));
+      const cmp3 = join(avatarDir, `chunk-${ci}.mp3`);
+      const cm = await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", clist, "-c:a", "libmp3lame", cmp3], presDir, job.id, "avatar_media");
+      if (!cm.ok) return cm;
+      avatarProgress(job.id, 12 + (ci / chunks.length) * 6, `分段推理 ${ci + 1}/${chunks.length} — 上传模型`);
+      const submitted = await submitJob({ audioB64: readFileSync(cmp3).toString("base64"), videoB64, videoFmt });
+      let done = false;
+      for (let i = 0; i < 360; i += 1) {
+        const state = await taskStatus(submitted.taskId);
+        const progress = Number(state.progress ?? 0);
+        avatarProgress(job.id, 18 + ((ci + progress / 100) / chunks.length) * 66, `分段推理 ${ci + 1}/${chunks.length} — 口型 ${Math.min(100, Math.round(progress))}%`);
+        if (state.status === "done") {
+          const raw = join(avatarDir, `chunk-${ci}-raw.mp4`);
+          writeFileSync(raw, await downloadResult(submitted.taskId));
+          chunkRaws.push(raw);
+          done = true;
+          break;
+        }
+        if (state.status === "error") return { ok: false, note: `数字人第 ${ci + 1}/${chunks.length} 段失败：${state.error || "未知"}` };
+        await new Promise((resolve) => setTimeout(resolve, 5000));
+      }
+      if (!done) return { ok: false, note: `数字人第 ${ci + 1}/${chunks.length} 段推理超时，可直接重试本环节` };
+    }
+
+    // 拼接分段 + 关键帧优化（1s 关键帧让浏览器换步 seek 瞬间完成）
+    avatarProgress(job.id, 86, `拼接 ${chunks.length} 段并优化关键帧`);
+    const rawLipsync = join(avatarDir, "lipsync-raw.mp4");
+    if (chunkRaws.length === 1) {
+      copyFileSync(chunkRaws[0], rawLipsync);
+    } else {
+      const catList = join(avatarDir, "chunk-cat.txt");
+      writeFileSync(catList, chunkRaws.map((p) => `file '${basename(p)}'`).join("\n"));
+      let cat = await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", catList, "-c", "copy", rawLipsync], avatarDir, job.id, "avatar_media");
+      if (!cat.ok) {
+        // 流复制拼接失败（各段参数细微不一致）→ 退回重编码拼接
+        cat = await sh("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", catList, "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p", "-an", rawLipsync], avatarDir, job.id, "avatar_media");
+        if (!cat.ok) return cat;
+      }
+    }
+    const gop = await sh("ffmpeg", ["-y", "-i", rawLipsync, "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-g", "25", "-pix_fmt", "yuv420p", "-movflags", "+faststart", "-an", lipsync], presDir, job.id, "avatar_media");
+    if (!gop.ok) return gop;
+    rmSync(rawLipsync, { force: true });
+    for (const r of chunkRaws) rmSync(r, { force: true });
+    writeJson(markerPath, { fingerprint, sourceFingerprint, generatedAt: new Date().toISOString(), chunks: chunks.length });
+    const split = await splitAvatarPreviews(job, files, lipsync, avatarDir, presDir);
+    if (!split.ok) return split;
+    return { ok: true, note: `数字人媒体生成完成（${chunks.length} 段推理拼接），进入接线` };
   },
 
   /** 接线段：确定性写 registry 配置驱动模板组件；旧脚手架回退 LLM 接线。 */
