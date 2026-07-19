@@ -166,12 +166,25 @@ export function startPipelineWorker() {
   setInterval(tick, 3000);
 }
 
-/** Approve current gate -> move to next stage and requeue. */
+/** Approve current gate -> move to next stage and requeue.
+ *  相邻门之间（无工作阶段，如 gate_avatar→gate_render）直接同步 settle 成
+ *  waiting_approval，消除"queued 中转窗口"——该窗口下连续放行会静默返回
+ *  false，导致作品卡在门上不动、无任何报错（2026-07-19 job-27 实翻车：
+ *  成片门放行返回 false 却没被察觉，渲染从未启动，静静卡住）。 */
 export function approveGate(jobId) {
   const job = getJob(jobId);
   if (!job || job.status !== "waiting_approval") return false;
-  updateJob(jobId, { stage: nextStage(job.stage), status: "queued", error: null });
+  const next = nextStage(job.stage);
+  const nextDef = stageDef(next);
   logEvent(jobId, job.stage, "审批通过");
+  if (next === "done") {
+    updateJob(jobId, { stage: "done", status: "done", error: null });
+  } else if (nextDef?.kind === "gate") {
+    updateJob(jobId, { stage: next, status: "waiting_approval", error: null });
+    logEvent(jobId, next, `到达审批门：${nextDef.label}`);
+  } else {
+    updateJob(jobId, { stage: next, status: "queued", error: null });
+  }
   return true;
 }
 
