@@ -103,36 +103,58 @@ function chapterGeneration(job) {
   } catch {}
   const reviewRows = db.prepare("SELECT chapter_key, status FROM chapter_reviews WHERE job_id = ?").all(job.id);
   const reviews = new Map(reviewRows.map((row) => [row.chapter_key, row.status]));
-  const chapters = existsSync(root)
-    ? readdirSync(root, { withFileTypes: true })
-      .filter((entry) => entry.isDirectory() && entry.name !== "01-example")
-      .sort((a, b) => a.name.localeCompare(b.name, "zh-CN", { numeric: true }))
-      .map((entry, index) => {
-        const dir = join(root, entry.name);
-        const files = readdirSync(dir);
-        const narrationFile = files.find((name) => name === "narrations.ts");
-        const chapterId = entry.name.replace(/^\d+[-_]?/, "");
-        let title = registryTitles.get(chapterId) || chapterId.replace(/[-_]+/g, " ");
-        let steps = 0;
-        if (narrationFile) {
-          const narration = readFileSync(join(dir, narrationFile), "utf8");
-          const lines = narration.match(/["'`](?:\\.|[^"'`])*["'`]/g) || [];
-          steps = lines.length;
-          const first = lines[0]?.slice(1, -1).trim();
-          if (!registryTitles.has(chapterId) && first) title = first.length > 30 ? `${first.slice(0, 30)}…` : first;
-        }
-        // Chapters may use the shared presentation stylesheet instead of a per-chapter CSS file.
-        const ready = Boolean(narrationFile && files.some((name) => name.endsWith(".tsx")));
-        return {
+  // 章节单元枚举（2026-07-19 兼容两种布局——job-29 实翻车：模型这次用
+  // 扁平文件 NN-name.tsx + NN-name.narrations.ts，旧逻辑只认子目录读出 0 章
+  // → 工作台"0/0"、预览面板卡"服务尚未启动"、无法逐章确认）：
+  //   ① 子目录布局：src/chapters/<key>/narrations.ts + <key>/*.tsx
+  //   ② 扁平文件布局：src/chapters/<key>.narrations.ts + <key>.tsx
+  // 两种都以 key（去掉 .narrations.ts 的基名 / 目录名）为章键。
+  const units = [];
+  if (existsSync(root)) {
+    for (const entry of readdirSync(root, { withFileTypes: true })) {
+      if (entry.isDirectory()) {
+        if (entry.name === "01-example") continue;
+        const files = readdirSync(join(root, entry.name));
+        if (!files.includes("narrations.ts")) continue;
+        units.push({
           key: entry.name,
-          index: index + 1,
-          title,
-          steps,
-          ready,
-          status: reviews.get(entry.name) || (ready ? "review" : "generating"),
-        };
-      })
-    : [];
+          narrationPath: join(root, entry.name, "narrations.ts"),
+          hasTsx: files.some((n) => n.endsWith(".tsx")),
+        });
+      } else if (entry.name.endsWith(".narrations.ts")) {
+        const key = entry.name.slice(0, -".narrations.ts".length);
+        if (key === "01-example") continue;
+        units.push({
+          key,
+          narrationPath: join(root, entry.name),
+          hasTsx: existsSync(join(root, `${key}.tsx`)),
+        });
+      }
+    }
+  }
+  const chapters = units
+    .sort((a, b) => a.key.localeCompare(b.key, "zh-CN", { numeric: true }))
+    .map((unit, index) => {
+      const chapterId = unit.key.replace(/^\d+[-_]?/, "");
+      let title = registryTitles.get(chapterId) || chapterId.replace(/[-_]+/g, " ");
+      let steps = 0;
+      try {
+        const narration = readFileSync(unit.narrationPath, "utf8");
+        const lines = narration.match(/["'`](?:\\.|[^"'`])*["'`]/g) || [];
+        steps = lines.length;
+        const first = lines[0]?.slice(1, -1).trim();
+        if (!registryTitles.has(chapterId) && first) title = first.length > 30 ? `${first.slice(0, 30)}…` : first;
+      } catch {}
+      const ready = Boolean(unit.hasTsx && steps > 0);
+      return {
+        key: unit.key,
+        index: index + 1,
+        title,
+        steps,
+        ready,
+        status: reviews.get(unit.key) || (ready ? "review" : "generating"),
+      };
+    });
   const serviceEvent = db.prepare("SELECT message FROM job_events WHERE job_id = ? AND stage = 'chapter_gen' AND (message LIKE '%agent start%' OR message LIKE '%API agent start%') ORDER BY id DESC LIMIT 1").get(job.id);
   const service = serviceEvent?.message?.match(/(?:API )?agent start(?: \((.+)\)|.*)/)?.[1]
     || (serviceEvent ? "本机订阅模型" : "等待模型服务");

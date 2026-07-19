@@ -108,8 +108,13 @@ function extractSignalsInPage() {
 function readStructure(presDir) {
   const chaptersTs = readFileSync(join(presDir, "src/registry/chapters.ts"), "utf8");
   const order = [...chaptersTs.matchAll(/id:\s*["']([^"']+)["']/g)].map((m) => m[1]);
+  const chaptersDir = join(presDir, "src/chapters");
   const steps = order.map((id) => {
-    const n = readFileSync(join(presDir, "src/chapters", id, "narrations.ts"), "utf8");
+    // 兼容子目录(<id>/narrations.ts)与扁平文件(<id>.narrations.ts)布局
+    const candidates = [join(chaptersDir, id, "narrations.ts"), join(chaptersDir, `${id}.narrations.ts`)];
+    const f = candidates.find((p) => existsSync(p));
+    if (!f) return 0;
+    const n = readFileSync(f, "utf8");
     return [...n.matchAll(/(["'])(?:[^"'\\\n]|\\.)*?\1/g)].length;
   });
   return { order, steps };

@@ -54,42 +54,55 @@ interface Segment {
  * (job-26 real incident, 2026-07-17). Scanning disk removes the dependency
  * on any particular import shape entirely.
  */
-async function readChapterOrder(): Promise<{ id: string; folder: string }[]> {
+async function readChapterOrder(): Promise<{ id: string; narrationFile: string }[]> {
   const src = await readFile(REGISTRY_PATH, "utf8");
   const ids = [...src.matchAll(/id:\s*["']([^"']+)["']/g)].map((m) => m[1]!);
 
   const entries = await readdir(CHAPTERS_DIR, { withFileTypes: true });
   const dirs = entries.filter((e) => e.isDirectory()).map((e) => e.name);
+  const files = entries.filter((e) => e.isFile()).map((e) => e.name);
 
-  const result: { id: string; folder: string }[] = [];
+  // 兼容两种布局（2026-07-19 job-29 实翻车：模型用扁平文件）：
+  //   ① 子目录：src/chapters/<folder>/narrations.ts（folder = id 或 *-id）
+  //   ② 扁平文件：src/chapters/<name>.narrations.ts（name = id 或 *-id）
+  const result: { id: string; narrationFile: string }[] = [];
   for (const id of ids) {
-    // Prefer exact match, then "<prefix>-<id>" (numbered folder convention).
     const folder = dirs.find((f) => f === id) ?? dirs.find((f) => f.endsWith(`-${id}`));
-    if (!folder) {
-      throw new Error(
-        `chapter id "${id}" registered but no matching folder found ` +
-          `under src/chapters/ (looked for "${id}" or "*-${id}"). ` +
-          `Existing folders: ${dirs.join(", ") || "(none)"}`,
-      );
+    if (folder && existsSync(join(CHAPTERS_DIR, folder, "narrations.ts"))) {
+      result.push({ id, narrationFile: join(CHAPTERS_DIR, folder, "narrations.ts") });
+      continue;
     }
-    result.push({ id, folder });
+    const flat = files.find((f) => f === `${id}.narrations.ts`)
+      ?? files.find((f) => f.endsWith(`-${id}.narrations.ts`));
+    if (flat) {
+      result.push({ id, narrationFile: join(CHAPTERS_DIR, flat) });
+      continue;
+    }
+    throw new Error(
+      `chapter id "${id}" registered but no narrations found under src/chapters/ ` +
+        `(looked for "${id}/narrations.ts" or "${id}.narrations.ts" or "*-${id}" variants).`,
+    );
   }
   return result;
 }
 
-async function loadNarrations(folder: string): Promise<unknown[]> {
-  const file = join(CHAPTERS_DIR, folder, "narrations.ts");
-  if (!existsSync(file)) {
-    throw new Error(`missing narrations.ts: ${file}`);
+async function loadNarrations(narrationFile: string): Promise<unknown[]> {
+  if (!existsSync(narrationFile)) {
+    throw new Error(`missing narrations file: ${narrationFile}`);
   }
-  const url = pathToFileURL(file).href;
+  const url = pathToFileURL(narrationFile).href;
   const mod = await import(url);
-  if (!Array.isArray(mod.narrations)) {
+  // 兼容任意导出名（narrations / <id>Narrations / default）——扁平文件常用
+  // 具名导出如 openingNarrations；取第一个数组导出。
+  const arr = Array.isArray(mod.narrations)
+    ? mod.narrations
+    : Object.values(mod).find((v) => Array.isArray(v));
+  if (!Array.isArray(arr)) {
     throw new Error(
-      `narrations.ts in ${folder} must export an array named "narrations"`,
+      `narrations file ${narrationFile} must export an array (narrations 或任意具名数组)`,
     );
   }
-  return mod.narrations as unknown[];
+  return arr as unknown[];
 }
 
 async function main() {
@@ -98,8 +111,8 @@ async function main() {
 
   const segments: Segment[] = [];
   let silentSteps = 0;
-  for (const { id, folder } of order) {
-    const arr = await loadNarrations(folder);
+  for (const { id, narrationFile } of order) {
+    const arr = await loadNarrations(narrationFile);
     arr.forEach((entry, i) => {
       const step = i + 1;
       if (typeof entry !== "string") {
