@@ -72,6 +72,13 @@ for (let g = 0; g < total; g++) {
         out.targetMissing = true;
       }
     }
+    // 内容效果件（博主标志：数字滚动/关键词点亮/圈注/金句卡）本步出现数
+    out.fx = {
+      counter: document.querySelectorAll(".fx-counter, .fx-slam").length,
+      wordmark: document.querySelectorAll(".fx-wordmark").length,
+      annotate: document.querySelectorAll(".fx-annotate, .fx-shine").length,
+      card: document.querySelectorAll(".fx-quotecard, .fx-chaptercard").length,
+    };
     // 空数字人窗（显示了但视频没画面）
     const av = document.querySelector(".avatar-presenter");
     if (av && Number(getComputedStyle(av).opacity) > 0.1) {
@@ -155,10 +162,31 @@ for (const e of effSeq) { if (STRONG.has(e)) run = 0; else { run++; maxFlatRun =
 if (strongRatio < 0.28) { const pen = Math.round((0.28 - strongRatio) * 60); score -= pen; defects.push(`强效果占比仅 ${(strongRatio * 100).toFixed(0)}%（<28%，画面偏平，扣${pen}）`); }
 if (punchCount < Math.max(2, Math.ceil(order.length * 0.4))) { const need = Math.max(2, Math.ceil(order.length * 0.4)); const pen = (need - punchCount) * 5; score -= pen; defects.push(`强推近(magnify/focus)仅 ${punchCount} 个（应≥${need}，缺博主式特写，扣${pen}）`); }
 if (maxFlatRun > 6) { const pen = (maxFlatRun - 6) * 3; score -= pen; defects.push(`最长平淡游程 ${maxFlatRun} 步（>6 连续无强效果，观感平淡，扣${pen}）`); }
+// 效果多样性（博主不会全程一种效果）：内容镜头里若单一类型 >65% 判单调
+const moveEffs = effSeq.filter((e) => ["focus", "magnify", "spotlight", "pan"].includes(e));
+if (moveEffs.length >= 6) {
+  const vc = {};
+  for (const e of moveEffs) vc[e] = (vc[e] || 0) + 1;
+  const topShare = Math.max(...Object.values(vc)) / moveEffs.length;
+  if (topShare > 0.65) { const pen = Math.round((topShare - 0.65) * 40); score -= pen; defects.push(`镜头单一化：${(topShare * 100).toFixed(0)}% 同一种（>65% 显单调，扣${pen}）`); }
+}
+
+// 内容效果件密度（博主感核心）：数字滚动/关键词点亮/圈注是知识博主的
+// 标志语言，全靠模型主动用，时多时少（job-26 每章 0.6 个 vs job-27 每章 5 个）。
+// 按全片峰值出现数估采用度（同一效果件跨步重复出现只算其最大同屏数）。
+const fxPeak = { counter: 0, wordmark: 0, annotate: 0, card: 0 };
+for (const s of perStep) if (s.fx) for (const k of Object.keys(fxPeak)) fxPeak[k] = Math.max(fxPeak[k], s.fx[k] || 0);
+const fxUsers = perStep.filter((s) => s.fx && (s.fx.counter + s.fx.wordmark + s.fx.annotate + s.fx.card) > 0).length;
+const fxDensity = total ? fxUsers / total : 0; // 有内容效果的步占比
+if (fxDensity < 0.25) {
+  const pen = Math.round((0.25 - fxDensity) * 40);
+  score -= pen;
+  defects.push(`内容效果件密度仅 ${(fxDensity * 100).toFixed(0)}%（数字滚动/关键词点亮/圈注偏少，缺博主质感，扣${pen}）`);
+}
 score = Math.max(0, score);
 
 console.log(JSON.stringify({
   jobId, score,
-  dimensions: { cutCount, offstage, emptyAvatar: emptyAv, subtitleTooLong: subLong, weakZoom, cameraMisses: misses, thinChapters: thinChapters.length, contentMoves, totalSteps: total, chapters: order.length, strongRatio: Number(strongRatio.toFixed(2)), punchCount, maxFlatRun },
+  dimensions: { cutCount, offstage, emptyAvatar: emptyAv, subtitleTooLong: subLong, weakZoom, cameraMisses: misses, thinChapters: thinChapters.length, contentMoves, totalSteps: total, chapters: order.length, strongRatio: Number(strongRatio.toFixed(2)), punchCount, maxFlatRun, fxDensity: Number(fxDensity.toFixed(2)), fxPeak },
   defects,
 }));
