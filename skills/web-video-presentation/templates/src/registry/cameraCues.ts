@@ -22,12 +22,19 @@ export type CameraEffect =
   | "host-full"
   | "host-split";
 
+/** 进入本步的转场（与 effect 正交）。whip = 径向甩切：~190ms 的
+ *  scale+blur 冲击帧，只用在"人↔素材"的情绪升档边界（典型：章首
+ *  数字人时刻/章节卡所在步）；每章 ≤1，句级平铺直叙一律硬切。 */
+export type CameraEnter = "whip";
+
 export interface CameraCue {
   effect: CameraEffect;
   /** CSS 选择器，focus/pan/spotlight 必填；只在当前章节画面内查找。 */
   target?: string;
   /** 放大倍数，仅 focus/pan 有效。 */
   zoom?: number;
+  /** 进入本步的转场声明，见 CameraEnter。 */
+  enter?: CameraEnter;
 }
 
 // chapterId -> 每步一个镜头（index = step，0-based；null = 不动）

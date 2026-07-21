@@ -13,6 +13,8 @@ import { join } from "node:path";
  */
 
 const EFFECTS = new Set(["focus", "pan", "spotlight", "magnify", "overview", "host", "host-full", "host-split"]);
+/** 进入转场词表（效果 v2b）：whip 甩切，与 effect 正交。 */
+const ENTERS = new Set(["whip"]);
 /** 需要 target 的内容镜头（host/host-full 是数字人时刻，免 target）。 */
 const CONTENT_MOVES = new Set(["focus", "pan", "spotlight", "magnify"]);
 export const ZOOM_MIN = 1.1;
@@ -24,6 +26,8 @@ export const DENSITY_BUDGETS = { restrained: 2, standard: 3, dense: 4 };
 export const MOVES_PER_CHAPTER = 3; // 兼容旧调用的缺省值
 export const HOSTS_PER_CHAPTER = 1;
 export const HOST_FULL_PER_WORK = 1;
+// 甩切只给"人↔素材"情绪升档边界（竞品实测：句级平铺直叙一律硬切）
+export const WHIPS_PER_CHAPTER = 1;
 
 export function readCameraRegistry(presDir) {
   const path = join(presDir, "src", "registry", "cameraCues.ts");
@@ -49,12 +53,20 @@ export function validateCameraCues(presDir, { density = "dense" } = {}) {
   for (const [chapterId, steps] of Object.entries(cues)) {
     let moves = 0;
     let hosts = 0;
+    let whips = 0;
     (steps ?? []).forEach((cue, stepIndex) => {
       if (!cue) return;
       const where = `${chapterId} 第 ${stepIndex + 1} 步`;
       if (!EFFECTS.has(cue.effect)) {
         findings.push({ rule: "camera-effect", severity: "error", detail: `${where} 未知镜头 "${cue.effect}"（词表：focus/pan/spotlight/magnify/overview/host/host-full/host-split）` });
         return;
+      }
+      if (cue.enter != null) {
+        if (!ENTERS.has(cue.enter)) {
+          findings.push({ rule: "camera-enter", severity: "error", detail: `${where} 未知转场 "${cue.enter}"（词表：whip）` });
+        } else if (cue.enter === "whip") {
+          whips += 1;
+        }
       }
       if (CONTENT_MOVES.has(cue.effect)) {
         moves += 1;
@@ -76,6 +88,9 @@ export function validateCameraCues(presDir, { density = "dense" } = {}) {
     }
     if (hosts > HOSTS_PER_CHAPTER) {
       findings.push({ rule: "host-budget", severity: "error", detail: `${chapterId} 共 ${hosts} 个讲述者时刻，超出每章 ${HOSTS_PER_CHAPTER} 个` });
+    }
+    if (whips > WHIPS_PER_CHAPTER) {
+      findings.push({ rule: "whip-budget", severity: "error", detail: `${chapterId} 共 ${whips} 个甩切（enter:"whip"），超出每章 ${WHIPS_PER_CHAPTER} 个——甩切只给"人↔素材"情绪升档边界，句级一律硬切` });
     }
   }
   // host-split 只允许出现在第一章、且必须是从第 1 步起的连续前缀（钩子开场专用）

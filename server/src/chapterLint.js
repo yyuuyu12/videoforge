@@ -25,8 +25,13 @@ function walkChapterFiles(root, base = root) {
   });
 }
 
-function lintLine(rel, lineText, lineNo, findings) {
+function lintLine(rel, lineText, lineNo, findings, fileUsesMediaFrame = false) {
   if (lineText.includes("lint-allow")) return;
+  // 媒体裸放（效果 v2b，竞品实证"截图永不平放"）：章节里出现 <img 但全文件
+  // 未使用 MediaFrame 包装。warn 级先记账校准，稳定后可升 error。
+  if (rel.endsWith(".tsx") && /<img[\s>]/.test(lineText) && !fileUsesMediaFrame) {
+    findings.push({ file: rel, line: lineNo, rule: "bare-media", severity: "warn", detail: "截图/媒体图片裸放——应包 <MediaFrame>（描边浮卡+角标+框内运动），见 CHAPTER-CRAFT 媒体容器条目" });
+  }
   // 字号下限：css `font-size: NNpx` 与 tsx 内联 `fontSize: NN|"NNpx"`
   for (const m of lineText.matchAll(/font-size:\s*(\d+(?:\.\d+)?)px/g)) {
     const px = Number.parseFloat(m[1]);
@@ -60,8 +65,9 @@ export function lintChapters(presDir) {
   const root = join(presDir, "src", "chapters");
   const findings = [];
   for (const rel of walkChapterFiles(root)) {
-    const lines = readFileSync(join(root, rel), "utf8").split("\n");
-    lines.forEach((text, index) => lintLine(rel, text, index + 1, findings));
+    const content = readFileSync(join(root, rel), "utf8");
+    const usesMediaFrame = content.includes("MediaFrame");
+    content.split("\n").forEach((text, index) => lintLine(rel, text, index + 1, findings, usesMediaFrame));
   }
   const errors = findings.filter((f) => f.severity === "error");
   return {

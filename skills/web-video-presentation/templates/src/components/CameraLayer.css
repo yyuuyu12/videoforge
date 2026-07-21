@@ -12,6 +12,14 @@
   will-change: transform;
 }
 
+/* 甩切冲击层（效果 v2b）：一次性 WAAPI scale+blur 动画的宿主，
+   与镜头 transform（camera-layer）、呼吸（camera-breath）各占一层互不覆写 */
+.camera-punch {
+  position: absolute;
+  inset: 0;
+  transform-origin: 50% 50%;
+}
+
 /* 呼吸感微推（效果 v2a）：20s 一个来回、1.0→1.045，肉眼几乎察觉不到
    "在动"，但画面永不死寂——知识类博主片的隐形生命感 */
 .camera-breath {

@@ -14,13 +14,16 @@
 | 放大镜 | 同一 registry 声明 `{effect:"magnify", target, zoom?}`（默认 2.6）——强推近+镜片压暗圈，给关键数字/核心结论的暴力特写 | zoom∈[1.4,3.0]，计入内容镜头预算；一章最多 1 个 magnify（它是最重的强调，连用会疲劳） |
 | 数字人时刻 | 同一 registry 声明 `{effect:"host"}`（讲述者时刻：数字人放大到主位、内容压暗）或 `{effect:"host-full"}`（开场全屏出镜） | 免 target；**host 每章 ≤1、host-full 全片 ≤1（开场专用）**；用在开场钩子/章节转折/结尾召唤；该步画面要极简（内容已退后，别放关键信息）；启用数字人的作品才生效 |
 | 钩子分屏开场 | `{effect:"host-split"}`（左 1:1 人物）+ 该步内容用 `<HookText><span>6个月 一个人</span><em>我差点崩溃</em></HookText>`（em = 强调色行） | **只允许第一章从第 1 步起的连续段**（校验强制）；钩子句 = 口播稿开头最炸的 1-3 句（每步一句或一屏 2-3 行）；该步底部字幕自动隐藏；比 host-full 冲击力更强，数字人作品优先用它开场 |
-| 跟读高亮 | `<WordMark word="收藏率"><span>收藏率</span></WordMark>`（from `../../components/effects/WordMark`） | 口播念到该词时自动点亮；**每屏 ≤2 处**；word 必须真实出现在本步 narration 里 |
-| 数字滚动 | `<Counter to={37} suffix="%" />` | 用于关键数据；同屏 ≤2 个 |
-| 手绘圈注 | `<Annotate kind="circle">37%</Annotate>` 或 `kind="underline"` | 包裹式，每屏 ≤1 处，圈最重要的一个点 |
+| 跟读高亮 | `<WordMark word="收藏率"><span>收藏率</span></WordMark>`（from `../../components/effects/WordMark`） | 口播念到该词时自动点亮（v2b 起字级精度：点亮时刻 = 该词首字真实开口时刻）；**每屏 ≤2 处**；word 必须真实出现在本步 narration 里 |
+| 数字滚动 | `<Counter to={37} suffix="%" word="37" colorRamp={["var(--text)","var(--accent)"]} />` | 用于关键数据；同屏 ≤2 个；**word 触发**：旁白念到该词才开始滚（数字是"跑出来"的，不是贴上来的）；colorRamp 随值语义变色（涨→accent 等），只收主题 token |
+| 手绘圈注 | `<Annotate kind="circle" word="37%">37%</Annotate>` 或 `kind="underline"` | 包裹式，每屏 ≤1 处，圈最重要的一个点；word 触发同 Counter |
 | 金句卡 | `<QuoteCard by="核心结论">流量奖励的是判断</QuoteCard>` 作某 step 整屏内容 | **全片 ≤2 张**，只给最值得截图传播的观点；该步 narration 就是这句话本身 |
-| 章节转场卡 | `<ChapterCard no={3} total={9} title="判断的落差" sub="一句预告"/>` 作章首 step 0 | 章多（≥6 章）时用，营造课程感；与 host 时刻不同屏 |
-| 扫光高亮 | `<Shine>关键短语</Shine>` | 每屏 ≤1 处；用在结论句关键词，不给普通正文 |
-| 大数字重锤 | `<Slam><Counter to={400} suffix="万"/></Slam>` | 每屏 ≤1 处；只给最有冲击力的那个数字 |
+| 章节转场卡 | `<ChapterCard no={3} total={9} title="判断的落差" sub="一句预告" variant="anchor"/>` 作章首 step 0 | 章多（≥6 章）时用，营造课程感；与 host 时刻不同屏；**anchor 变体** = 章题外"设计工具选中框"描边生长+四角锚点弹入（博主片签名动作，优先用）；**谢幕**：step 1 再渲染一次并加 `exit`，卡片消散退场而非瞬间消失 |
+| 扫光高亮 | `<Shine word="收藏率">关键短语</Shine>` | 每屏 ≤1 处；用在结论句关键词，不给普通正文；word 触发同 Counter |
+| 大数字重锤 | `<Slam word="四百万"><Counter to={400} suffix="万"/></Slam>` | 每屏 ≤1 处；只给最有冲击力的那个数字；word 触发：砸入踩在报数那一拍 |
+| 媒体容器 | `<MediaFrame src="/media/shot.png" label="来源名" tilt={-4} />`（也可包 children 自绘 UI） | **截图/屏录永不裸放**（lint 记账）：描边浮卡+角标+暗角+框内 Ken Burns 持续运动；tilt 3D 倾角**相邻实例交替 ±3~6°**（全片同角度=AI 味）；motion：push 缓推（默认）/drift 横漂/none（仅动图内容） |
+| 甩切 | registry 里给 cue 加 `enter:"whip"`（与 effect 正交，如 `{effect:"host-full", enter:"whip"}`） | ~190ms 径向冲击帧，**只用在"人↔素材"情绪升档边界**（典型：章首数字人时刻/章节卡所在步）；**每章 ≤1**（校验强制）；句级平铺直叙一律硬切 |
+| 场景提亮 | step 根容器加 `className="scene-lift"` | 整场暗→亮 0.5s，配合元素错峰入场；**章首/重场景步专用**，不要每步都用（用滥变呼吸灯） |
 | 呼吸感微推 | 自动生效（camera-breath 层），无需声明 | 全程 1.0→1.045/20s 往复——不要再叠加自己写的整屏缓推动画（会共振） |
 
 镜头准则：**镜头为讲解服务，不是炫技**——推近的时机应与 narration 讲到该元素的时机一致；
@@ -36,6 +39,18 @@
 - 全片内容镜头（focus/spotlight）**至少 = 章节数的一半**（如 12 章 ≥6 个），关键数字/核心结论所在步优先；
 - focus 的 zoom **不得低于 1.4**（1.1-1.35 的轻推用 pan 表达；低于 1.4 的 focus 校验会直接拦）；
 - 带核心数字的画面优先用 `<Counter>` 呈现（数字滚动落定），带关键词强调用 `<WordMark>`（word 必须与 narration 原词一致才会点亮）。
+
+**转场与入场纪律（2026-07-20 定稿——逐帧分析 10 条知识类博主片、40 个切换点的实证规律）**：
+- **切永远是硬的，动画感全押在"切后 1 秒的入场"上**：实测竞品 85% 以上转场是纯硬切，
+  **零交叉淡化、零滑动推移**——句与句之间禁止任何 fade/slide 场景过渡（PPT 退化味）；
+- 转场按叙事层级分档：句级 = 硬切；"人↔素材"情绪升档边界 = `enter:"whip"` 甩切（每章 ≤1）；
+  章节级才允许更重的仪式（ChapterCard anchor 入场 + exit 谢幕）；
+- **入场顺序契约：先框架、后数据**——容器/标题先落位（0~150ms），数字/Counter/图表
+  压轴进场（≥400ms delay 或 word 触发）；数据永远是"跑出来"的，不是随框架一起贴上来的；
+- **没有一帧是完全静止的**：截图/屏录必须包 `<MediaFrame>`（自带框内缓推），停留画面至少
+  保留一层低幅度运动（呼吸微推层全局兜底，但媒体容器内的运动要自己声明）；
+- 效果触发时刻优先用 `word` 参数对齐口播（Counter/Slam/Shine/Annotate 均支持），
+  写死毫秒 delay 只用于同一触发时刻内部的错峰。
 
 **内容效果件下限（2026-07-19 定稿——job-24 实测内容效果密度仅 12%，观感"干"；job-27 达 59% 才有博主质感）**：
 - **每一个屏上出现的数字**（百分比/金额/倍数/年份/排名）都**必须**用 `<Counter>`（大数字外加 `<Slam>`），不允许静态数字裸放；

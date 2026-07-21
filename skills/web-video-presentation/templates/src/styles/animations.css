@@ -4,6 +4,17 @@
  * All durations / easings come from the active theme's tokens.
  * ───────────────────────────────────────────────────────────────────── */
 
+/* 场景入场提亮（效果 v2b）：新 step 整场从暗到亮 0.5s——配合元素错峰
+   入场（框架先、数据后）用在 step 根容器上，模拟博主片"切后第一秒"
+   的分层入场质感。不要每步都用（章首/重场景步专用，用滥变呼吸灯）。 */
+.scene-lift {
+  animation: scene-lift 0.5s ease-out both;
+}
+@keyframes scene-lift {
+  from { filter: brightness(0.72); }
+  to { filter: brightness(1); }
+}
+
 /* MaskReveal — clip-path text wipe (left → right) */
 .mask-reveal {
   clip-path: inset(0 100% 0 0);

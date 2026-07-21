@@ -4,6 +4,9 @@
 export interface SubtitleCue {
   text: string;
   startMs: number;
+  /** 每个字的真实开口时刻（毫秒，与 text 逐字对齐）——词级效果触发的
+   *  精度来源（useSpeechTrigger/WordMark）。旧数据无此字段时退化为 startMs。 */
+  charMs?: number[];
 }
 
 // chapterId -> per-step array of cues (index = step, 0-based)

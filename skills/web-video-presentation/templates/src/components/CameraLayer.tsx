@@ -36,6 +36,7 @@ function clampZoom(cue: CameraCue): number {
 export function CameraLayer({ chapterId, step, children }: Props) {
   const layerRef = useRef<HTMLDivElement | null>(null);
   const spotRef = useRef<HTMLDivElement | null>(null);
+  const punchRef = useRef<HTMLDivElement | null>(null);
 
   useEffect(() => {
     const layer = layerRef.current;
@@ -43,6 +44,19 @@ export function CameraLayer({ chapterId, step, children }: Props) {
     if (!layer || !spot) return;
 
     const cue = CAMERA_CUES[chapterId]?.[step] ?? null;
+
+    // 甩切（效果 v2b）：进入本步时一帧径向冲击（scale+blur 速降），模拟
+    // 博主片"人↔素材"边界的运动模糊甩切。一次性 WAAPI 动画，与镜头
+    // transform / 呼吸层互不干扰；句级平铺直叙不要用（cameraCheck 限每章 1 个）。
+    if (cue?.enter === "whip" && punchRef.current?.animate) {
+      punchRef.current.animate(
+        [
+          { transform: "scale(1.16)", filter: "blur(14px)", opacity: 0.75 },
+          { transform: "scale(1)", filter: "blur(0px)", opacity: 1 },
+        ],
+        { duration: 190, easing: "cubic-bezier(0.2, 0.85, 0.3, 1)" },
+      );
+    }
 
     const reset = () => {
       layer.style.transform = "none";
@@ -147,9 +161,12 @@ export function CameraLayer({ chapterId, step, children }: Props) {
   return (
     <div className="camera-viewport">
       <div ref={layerRef} className="camera-layer">
-        {/* 呼吸感微推（效果 v2a）：全程 1.0→1.045 极缓往复，画面永不完全静止。
-            与镜头变换嵌套复合——推近时呼吸仍在，博主片的"隐形生命感"。 */}
-        <div className="camera-breath">{children}</div>
+        {/* 甩切冲击层（效果 v2b）：只承接一次性 whip 动画，平时无样式开销 */}
+        <div ref={punchRef} className="camera-punch">
+          {/* 呼吸感微推（效果 v2a）：全程 1.0→1.045 极缓往复，画面永不完全静止。
+              与镜头变换嵌套复合——推近时呼吸仍在，博主片的"隐形生命感"。 */}
+          <div className="camera-breath">{children}</div>
+        </div>
       </div>
       <div ref={spotRef} className="camera-spotlight" aria-hidden="true" />
     </div>

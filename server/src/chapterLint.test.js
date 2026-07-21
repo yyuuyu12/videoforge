@@ -56,6 +56,25 @@ test("使用主题 token 的行不报颜色违规", () => {
   assert.equal(lintChapters(presDir).findings.length, 0);
 });
 
+test("媒体裸放：<img 无 MediaFrame 记 warn，有则放行", () => {
+  const bare = makeChapter({
+    "Demo.tsx": 'export const D = () => <img src="/media/shot.png" alt="" />;\n',
+  });
+  const bareResult = lintChapters(bare);
+  assert.equal(bareResult.pass, true); // warn 级不阻断
+  assert.equal(lintDefectSummary(bareResult)["lint:bare-media"], 1);
+
+  const wrapped = makeChapter({
+    "Demo.tsx": 'import { MediaFrame } from "../../components/effects/MediaFrame";\nexport const D = () => <MediaFrame src="/media/shot.png" label="来源" tilt={-4} />;\n',
+  });
+  assert.equal(lintChapters(wrapped).findings.length, 0);
+
+  const wrappedRaw = makeChapter({
+    "Demo.tsx": 'import { MediaFrame } from "../../components/effects/MediaFrame";\nexport const D = () => <MediaFrame label="来源"><img src="/media/a.png" alt="" /></MediaFrame>;\n',
+  });
+  assert.equal(lintChapters(wrappedRaw).findings.length, 0);
+});
+
 test("干净章节全绿", () => {
   const presDir = makeChapter({
     "Demo.css": ".title { font-size: 48px; color: var(--text); }\n",

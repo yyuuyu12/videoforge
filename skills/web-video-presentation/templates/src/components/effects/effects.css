@@ -18,6 +18,10 @@
   display: inline-block;
   font-variant-numeric: tabular-nums; /* 滚动时数字不抖宽 */
 }
+.fx-counter__affix {
+  font-style: normal; /* 斜体展示字体缺 ¥/％ 等字形时回退正体，正斜混排各占其位防互压 */
+  margin-inline: 0.06em;
+}
 .fx-counter--settled {
   animation: fx-counter-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }
@@ -174,6 +178,17 @@
     fx-slam-shake 0.28s linear 0.42s;
   animation-delay: var(--fx-delay, 150ms), calc(var(--fx-delay, 150ms) + 300ms);
 }
+/* 口播触发等待态（v2b）：word 触发词还没被念到——隐藏且不启动动画 */
+.fx-slam--wait {
+  animation: none;
+  opacity: 0;
+}
+.fx-shine--wait::after {
+  animation: none;
+}
+.fx-annotate--wait .fx-annotate__path {
+  animation: none;
+}
 @keyframes fx-slam-in {
   from { opacity: 0; transform: scale(2.2); }
   60% { opacity: 1; }
@@ -185,6 +200,120 @@
   50% { transform: translate(-3px, 2px); }
   75% { transform: translate(2px, 1px); }
   100% { transform: translate(0, 0); }
+}
+
+/* ===== v2b 效果件（2026-07-20 竞品动效对标批次）===== */
+
+/* 媒体容器：截图/屏录永不裸放——描边圆角浮卡 + 角标 + 暗角 + 框内持续运动 */
+.fx-mediaframe {
+  position: relative;
+  margin: 0;
+  border: 2px solid color-mix(in srgb, var(--accent, #f59e0b) 55%, transparent);
+  border-radius: 18px;
+  background: var(--surface-2, var(--surface));
+  box-shadow: 0 24px 60px color-mix(in srgb, var(--shell, #000) 45%, transparent);
+  transform: perspective(1400px) rotateY(var(--mf-tilt, 0deg));
+}
+.fx-mediaframe__viewport {
+  position: relative;
+  overflow: hidden;
+  border-radius: 15px;
+}
+.fx-mediaframe__motion {
+  transform-origin: 50% 45%;
+}
+.fx-mediaframe__motion--push {
+  animation: fx-mf-push 14s ease-in-out infinite alternate;
+}
+.fx-mediaframe__motion--drift {
+  animation: fx-mf-drift 18s ease-in-out infinite alternate;
+}
+@keyframes fx-mf-push {
+  from { transform: scale(1); }
+  to { transform: scale(1.09) translateY(-1.5%); }
+}
+@keyframes fx-mf-drift {
+  from { transform: scale(1.06) translateX(-1.8%); }
+  to { transform: scale(1.06) translateX(1.8%); }
+}
+.fx-mediaframe__img {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+/* 边缘暗角：博主片截图的"景深感"，中心通透四角轻压 */
+.fx-mediaframe__vignette {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  box-shadow: inset 0 0 90px color-mix(in srgb, var(--shell, #000) 38%, transparent);
+  border-radius: 15px;
+}
+.fx-mediaframe__label {
+  position: absolute;
+  top: -16px;
+  left: 22px;
+  padding: 4px 14px;
+  font: 20px var(--font-mono);
+  color: var(--text);
+  background: color-mix(in srgb, var(--accent, #f59e0b) 30%, var(--surface, #000));
+  border: 1px solid color-mix(in srgb, var(--accent, #f59e0b) 60%, transparent);
+  border-radius: 8px;
+}
+
+/* 章节卡 anchor 变体：章题外的"设计工具选中框"——描边生长 + 四角锚点弹入 */
+.fx-chaptercard__anchorbox {
+  position: relative;
+  display: inline-block;
+  padding: 18px 30px;
+}
+.fx-chaptercard__frame {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+}
+.fx-chaptercard__frame rect {
+  fill: none;
+  stroke: var(--accent);
+  stroke-width: 2;
+  vector-effect: non-scaling-stroke;
+  stroke-dasharray: 100;
+  stroke-dashoffset: 100;
+  animation: fx-frame-draw 0.6s ease-out 0.25s forwards;
+}
+@keyframes fx-frame-draw {
+  to { stroke-dashoffset: 0; }
+}
+.fx-chaptercard__handle {
+  position: absolute;
+  width: 12px;
+  height: 12px;
+  background: var(--accent);
+  transform: scale(0);
+  animation: fx-handle-pop 0.25s cubic-bezier(0.34, 1.56, 0.64, 1) forwards;
+}
+.fx-chaptercard__handle--tl { top: -6px; left: -6px; animation-delay: 0.55s; }
+.fx-chaptercard__handle--tr { top: -6px; right: -6px; animation-delay: 0.63s; }
+.fx-chaptercard__handle--br { bottom: -6px; right: -6px; animation-delay: 0.71s; }
+.fx-chaptercard__handle--bl { bottom: -6px; left: -6px; animation-delay: 0.79s; }
+@keyframes fx-handle-pop {
+  to { transform: scale(1); }
+}
+
+/* 章节卡谢幕：下一步开场时消散退场（模糊 + 右移 + 淡出），代替瞬间消失 */
+.fx-chaptercard--exit {
+  pointer-events: none;
+  animation: fx-chapter-exit 0.6s ease-in both;
+}
+@keyframes fx-chapter-exit {
+  to {
+    opacity: 0;
+    filter: blur(14px);
+    transform: translateX(60px);
+  }
 }
 
 /* ===== host-split 钩子分屏（效果 v2a+）===== */

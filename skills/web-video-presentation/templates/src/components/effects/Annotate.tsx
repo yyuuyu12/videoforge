@@ -1,22 +1,29 @@
 import { type ReactNode } from "react";
+import { useSpeechTrigger } from "./useSpeechTrigger";
 import "./effects.css";
 
 interface Props {
   /** circle = 手绘椭圆圈注；underline = 手绘下划线。 */
   kind?: "circle" | "underline";
-  /** 动画启动延迟（毫秒）。 */
+  /** 动画启动延迟（毫秒，相对触发时刻）。 */
   delay?: number;
+  /** 口播触发词（效果 v2b）：旁白念到该词才开始画圈。缺省挂载即播。 */
+  word?: string;
   children: ReactNode;
 }
 
 /**
  * 手绘圈注（效果 v1）：SVG 描边动画现场"画"出圈/线，科普视频经典强调。
  * 包裹式设计（不做选择器定位），随内容排版天然对齐。
- * 用法：<Annotate kind="circle">37%</Annotate>
+ * 用法：<Annotate kind="circle" word="37%">37%</Annotate>
  */
-export function Annotate({ kind = "circle", delay = 400, children }: Props) {
+export function Annotate({ kind = "circle", delay = 400, word, children }: Props) {
+  const fired = useSpeechTrigger(word);
   return (
-    <span className={`fx-annotate fx-annotate--${kind}`} style={{ ["--fx-delay" as string]: `${delay}ms` }}>
+    <span
+      className={`fx-annotate fx-annotate--${kind}${fired ? "" : " fx-annotate--wait"}`}
+      style={{ ["--fx-delay" as string]: `${delay}ms` }}
+    >
       {children}
       {kind === "circle" ? (
         <svg className="fx-annotate__svg" viewBox="0 0 120 60" preserveAspectRatio="none" aria-hidden="true">
