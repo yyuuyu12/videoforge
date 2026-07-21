@@ -4,6 +4,11 @@ import { DATA_ROOT } from "./config.js";
 
 export const db = new DatabaseSync(join(DATA_ROOT, "data.db"));
 
+// Workers poll and write the same local database while the dashboard reads it.
+// WAL lets readers continue during writes; busy_timeout absorbs short-lived
+// contention instead of surfacing SQLITE_BUSY to an otherwise healthy request.
+db.exec("PRAGMA journal_mode = WAL; PRAGMA busy_timeout = 5000;");
+
 db.exec(`
 CREATE TABLE IF NOT EXISTS sources (
   id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -124,6 +129,17 @@ if (!feedbackColumns.includes("result")) db.exec("ALTER TABLE feedback ADD COLUM
 if (!feedbackColumns.includes("phase")) db.exec("ALTER TABLE feedback ADD COLUMN phase TEXT");
 if (!feedbackColumns.includes("attachment_path")) db.exec("ALTER TABLE feedback ADD COLUMN attachment_path TEXT");
 if (!feedbackColumns.includes("attachment_mime")) db.exec("ALTER TABLE feedback ADD COLUMN attachment_mime TEXT");
+
+// Hot paths: worker queue selection, job detail/event feeds, feedback polling,
+// usage pagination, and Douyin extraction history.
+db.exec(`
+CREATE INDEX IF NOT EXISTS idx_jobs_queue ON jobs(status, id);
+CREATE INDEX IF NOT EXISTS idx_jobs_updated ON jobs(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_job_events_job_ts ON job_events(job_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_feedback_job_created ON feedback(job_id, id DESC);
+CREATE INDEX IF NOT EXISTS idx_usage_created ON usage_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_douyin_status_updated ON douyin_extractions(status, updated_at DESC);
+`);
 
 // ---- tiny helpers ---------------------------------------------------------
 

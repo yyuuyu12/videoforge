@@ -83,6 +83,9 @@ const DEFAULTS = {
   devServerBasePort: 5300,
   previewMode: "static",
   discovery: { intervalMinutes: 120, autoStart: true },
+  // 效果打分（博主质感维）接入管线：enabled=跑并记账；gate=分数低于 minScore
+  // 时触发一次效果向修复（默认 false=只记账校准，稳定后再开门禁）。
+  effectScore: { enabled: true, gate: false, minScore: 72 },
 };
 
 function deepMerge(base, extra) {

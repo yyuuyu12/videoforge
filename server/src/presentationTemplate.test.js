@@ -79,7 +79,11 @@ test("narration extraction accepts minified chapter imports", async () => {
     new URL("../../skills/web-video-presentation/templates/scripts/extract-narrations.ts", import.meta.url),
     "utf8",
   );
-  assert.match(extractor, /from\\s\*\["'\]/);
+  // Resolve chapter files from the registry and filesystem rather than
+  // depending on one particular import formatting.
+  assert.match(extractor, /readdir\(CHAPTERS_DIR/);
+  assert.match(extractor, /narrationFile: join\(CHAPTERS_DIR, flat\)/);
+  assert.match(extractor, /\.narrations\.ts/);
 });
 
 test("avatar layout audit accepts an absolute right-side reservation", async () => {

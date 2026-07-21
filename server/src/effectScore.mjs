@@ -7,6 +7,7 @@
 import { createRequire } from "node:module";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
+import { config } from "./config.js";
 
 const require = createRequire(import.meta.url);
 const { chromium } = require("playwright-core");
@@ -14,7 +15,8 @@ const { chromium } = require("playwright-core");
 const jobId = process.argv[2];
 const base = process.argv[3] || "http://127.0.0.1:5401";
 const previewUrl = `${base}/preview/${jobId}/`;
-const pres = join(process.cwd(), "workspaces", `job-${jobId}`, "presentation");
+// 路径走 dataRoot 解析（B2 定稿）——不依赖 cwd 恰好是仓库根
+const pres = join(config.workspacesRoot, `job-${jobId}`, "presentation");
 
 function readStructure() {
   const src = readFileSync(join(pres, "src/registry/chapters.ts"), "utf8");
@@ -72,12 +74,13 @@ for (let g = 0; g < total; g++) {
         out.targetMissing = true;
       }
     }
-    // 内容效果件（博主标志：数字滚动/关键词点亮/圈注/金句卡）本步出现数
+    // 内容效果件（博主标志：数字滚动/关键词点亮/圈注/金句卡/媒体容器）本步出现数
     out.fx = {
       counter: document.querySelectorAll(".fx-counter, .fx-slam").length,
       wordmark: document.querySelectorAll(".fx-wordmark").length,
       annotate: document.querySelectorAll(".fx-annotate, .fx-shine").length,
       card: document.querySelectorAll(".fx-quotecard, .fx-chaptercard").length,
+      media: document.querySelectorAll(".fx-mediaframe").length,
     };
     // 空数字人窗（显示了但视频没画面）
     const av = document.querySelector(".avatar-presenter");
@@ -174,9 +177,9 @@ if (moveEffs.length >= 6) {
 // 内容效果件密度（博主感核心）：数字滚动/关键词点亮/圈注是知识博主的
 // 标志语言，全靠模型主动用，时多时少（job-26 每章 0.6 个 vs job-27 每章 5 个）。
 // 按全片峰值出现数估采用度（同一效果件跨步重复出现只算其最大同屏数）。
-const fxPeak = { counter: 0, wordmark: 0, annotate: 0, card: 0 };
+const fxPeak = { counter: 0, wordmark: 0, annotate: 0, card: 0, media: 0 };
 for (const s of perStep) if (s.fx) for (const k of Object.keys(fxPeak)) fxPeak[k] = Math.max(fxPeak[k], s.fx[k] || 0);
-const fxUsers = perStep.filter((s) => s.fx && (s.fx.counter + s.fx.wordmark + s.fx.annotate + s.fx.card) > 0).length;
+const fxUsers = perStep.filter((s) => s.fx && (s.fx.counter + s.fx.wordmark + s.fx.annotate + s.fx.card + (s.fx.media || 0)) > 0).length;
 const fxDensity = total ? fxUsers / total : 0; // 有内容效果的步占比
 if (fxDensity < 0.25) {
   const pen = Math.round((0.25 - fxDensity) * 40);
@@ -185,8 +188,11 @@ if (fxDensity < 0.25) {
 }
 score = Math.max(0, score);
 
+// 甩切采用数（效果 v2b）：竞品边界节奏的观测维度，暂不参与扣分
+const whipCount = flat.filter((s) => s.cue?.enter === "whip").length;
+
 console.log(JSON.stringify({
   jobId, score,
-  dimensions: { cutCount, offstage, emptyAvatar: emptyAv, subtitleTooLong: subLong, weakZoom, cameraMisses: misses, thinChapters: thinChapters.length, contentMoves, totalSteps: total, chapters: order.length, strongRatio: Number(strongRatio.toFixed(2)), punchCount, maxFlatRun, fxDensity: Number(fxDensity.toFixed(2)), fxPeak },
+  dimensions: { cutCount, offstage, emptyAvatar: emptyAv, subtitleTooLong: subLong, weakZoom, cameraMisses: misses, thinChapters: thinChapters.length, contentMoves, totalSteps: total, chapters: order.length, strongRatio: Number(strongRatio.toFixed(2)), punchCount, maxFlatRun, fxDensity: Number(fxDensity.toFixed(2)), fxPeak, whipCount },
   defects,
 }));

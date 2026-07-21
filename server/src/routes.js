@@ -921,11 +921,18 @@ api.get("/jobs/:id/avatar/previews", (req, res) => {
   const dir = join(presentation, "public", "avatar", "chapters");
   if (!existsSync(dir)) return res.json([]);
   const files = readdirSync(dir).filter((name) => name.endsWith(".mp4"));
-  const manifest = join(presentation, "audio-segments.json");
+  const manifest = join(presentation, "presentation-manifest.json");
+  const legacyManifest = join(presentation, "audio-segments.json");
   let chapterOrder = [];
-  if (existsSync(manifest)) {
+  for (const path of [manifest, legacyManifest]) {
+    if (!existsSync(path)) continue;
     try {
-      chapterOrder = [...new Set(JSON.parse(readFileSync(manifest, "utf8")).map((segment) => segment.chapter))];
+      const parsed = JSON.parse(readFileSync(path, "utf8"));
+      const segments = Array.isArray(parsed) ? parsed : parsed.segments;
+      if (Array.isArray(segments)) {
+        chapterOrder = [...new Set(segments.map((segment) => segment.chapter))];
+        if (chapterOrder.length) break;
+      }
     } catch {}
   }
   const order = new Map(chapterOrder.map((chapter, index) => [chapter, index]));

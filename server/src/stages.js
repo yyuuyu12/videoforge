@@ -8,8 +8,9 @@ import { runAgent } from "./agentRunner.js";
 import { captureJobCover, renderJob } from "./render.js";
 import { loadSettings, minimaxKey } from "./settings.js";
 import { typecheckPresentation } from "./preview.js";
+import { buildPresentationManifest } from "./chapterMetadata.js";
 import { validateSubtitleCues, cueEvidence } from "./subtitleCheck.js";
-import { recordQualityEntry } from "./qualityLedger.js";
+import { recordQualityEntry, ledgerStats } from "./qualityLedger.js";
 import { health as heygemHealth, submitJob, taskStatus, downloadResult } from "./heygem.js";
 
 /**
@@ -193,10 +194,13 @@ async function splitAvatarPreviews(job, files, lipsync, avatarDir, presDir) {
 }
 
 export function orderedAvatarAudioFiles(presDir, audioRoot) {
-  const manifest = join(presDir, "audio-segments.json");
-  if (existsSync(manifest)) {
+  const manifests = [join(presDir, "presentation-manifest.json"), join(presDir, "audio-segments.json")];
+  for (const manifest of manifests) {
+    if (!existsSync(manifest)) continue;
     try {
-      const segments = JSON.parse(readFileSync(manifest, "utf8"));
+      const parsed = JSON.parse(readFileSync(manifest, "utf8"));
+      const segments = Array.isArray(parsed) ? parsed : parsed.segments;
+      if (!Array.isArray(segments)) continue;
       const ordered = segments
         .map((segment) => join(audioRoot, String(segment.audio || "")))
         .filter((file) => existsSync(file));
@@ -470,6 +474,16 @@ const runners = {
       : densityPreset === "airy"
         ? "每屏最多 3 个信息单元，优先大留白和单观点表达"
         : "每屏最多 4 个信息单元，信息量与留白保持均衡";
+    // 账本回流（2026-07-20）：把近 30 天反复出现的缺陷（复发≥2 次）作为"病历"
+    // 注入生成 prompt，让工作台带着自己的历史生成、主动规避高频翻车点。
+    let ledgerRecap = "";
+    try {
+      const stats = ledgerStats(30);
+      if (stats.repeatOffenders?.length) {
+        const top = stats.repeatOffenders.slice(0, 6).map((o) => `${o.type}(${o.count}次)`).join("、");
+        ledgerRecap = `- 近 30 天你的作品反复出现这些缺陷，本次生成请重点规避：${top}。这些是确定性检查会拦的高频翻车点，首次就写对能省掉修复轮。`;
+      }
+    } catch {}
     const prompt = [
       `你在一个视频生成流水线的无人值守环节中工作。当前目录是一个已完成 Phase 1 的 web-video-presentation 项目：`,
       `- ./article.md ./script.md ./outline.md 已定稿（不要改它们）`,
@@ -490,14 +504,16 @@ const runners = {
       `- 颜色/字体只用主题 token；严格遵守上面的作品级字号与排版密度预设`,
       `- 首次生成必须满足 CHAPTER-CRAFT 的“首次生成质量契约”：先拆分超预算内容，不得依赖生成后的截图修复来补救拥挤、溢出、短标题三行或安全区冲突`,
       `- 动笔前先读 ${skill}/references/EXEMPLARS.md（真实作品首次验收 100 分的三个章节骨架）：安全区写死在容器、数据驱动 step、滚动窗口列表——借鉴骨架，内容原创`,
-      `- 效果件按 CHAPTER-CRAFT「镜头与效果件」使用：镜头在 registry/cameraCues.ts 声明（每章 ≤3）、WordMark 跟读高亮（每屏 ≤2）、Counter 数字滚动、Annotate 圈注（每屏 ≤1）——只能用库里的件，违规会被确定性校验拦下`,
+      `- 效果件按 CHAPTER-CRAFT「镜头与效果件」使用：镜头在 registry/cameraCues.ts 声明（每章 ≤3）、WordMark 跟读高亮（每屏 ≤2）、Counter 数字滚动、Annotate 圈注（每屏 ≤1）、截图/媒体图必须包 <MediaFrame>（禁裸放，tilt 相邻交替 ±3~6°）——只能用库里的件，违规会被确定性校验拦下`,
+      `- 效果节奏对齐口播（CHAPTER-CRAFT「转场与入场纪律」）：Counter/Slam/Shine/Annotate 优先传 word 触发词（旁白念到才播），写死 delay 只做同拍内错峰；入场顺序先框架后数据；句与句之间禁止 fade/slide 场景过渡（甩切 enter:"whip" 由编排器自动布点，每章 ≤1）`,
       `- 效果采用度是硬要求（CHAPTER-CRAFT「采用度下限」）：数字人作品第一章第一步必须 {effect:"host-full"}、全片至少 1 个 host 时刻；内容镜头（focus/spotlight）总数至少为章节数一半，focus zoom ≥1.4；密度默认 dense（每章 2-4 个内容镜头 + 相邻步不连强推）——镜头我会用编排器自动补齐，你可只声明明确想要的`,
       `- 内容效果件下限（博主质感，CHAPTER-CRAFT「内容效果件下限」）：屏上每个数字必须 <Counter>（大数字加 <Slam>）、每章≥2 处 <WordMark> 点亮口播关键词、有对比/结论用 <Annotate>/<Shine>；目标 ≥40% 的 step 带内容效果件。数据驱动共享渲染器（数字统一过 Counter）是达标高效写法——用得省画面会"干"`,
       `- kicker 用 .title-label 一类的大标题样式，不要小号说明文字`,
       `- 每章完成后自己跑完工自检并修复 FAIL 项；全项目 npx tsc --noEmit 必须 0 错误`,
       `- 可以并行使用子任务加速，但最终交付要整体一致`,
+      ledgerRecap,
       `不要停下来向用户提问。全部做完、tsc 通过后退出。`,
-    ].join("\n");
+    ].filter(Boolean).join("\n");
     const generated = await runAgent({ jobId: job.id, stage: "chapter_gen", cwd: job.workspace, prompt });
     if (!generated.ok) return generated;
     try {
@@ -532,6 +548,12 @@ const runners = {
 
     let r = await sh("npm", ["run", "extract-narrations"], presDir, job.id, "audio_synth");
     if (!r.ok) return r;
+    try {
+      const manifest = buildPresentationManifest(presDir);
+      logEvent(job.id, "audio_synth", `已建立作品 manifest：${manifest.chapters.length} 章、${manifest.segments.length} 段`);
+    } catch (error) {
+      return { ok: false, note: `作品 manifest 建立失败：${error.message}` };
+    }
     r = await sh("node", ["scripts/synthesize-audio-node.mjs"], presDir, job.id, "audio_synth", { [config.tts.apiKeyEnv]: apiKey });
     const usageMatch = r.output?.match(/VF_USAGE\s+(\{[^\n]+\})/);
     if (usageMatch) {
@@ -850,6 +872,33 @@ export async function repairChapterQuality(job, audit) {
     prompt,
     usageOperation: "visual-quality-repair",
     imagePaths,
+  });
+}
+
+/**
+ * 确定性违规的自动回喂修复（2026-07-20：把"检验失败→人工点重试"升级为
+ * "失败→自动把精确证据喂回模型重生成"）。lint/camera/effect 的证据本来就
+ * 精确到文件+行号/步号，直接交给模型改，不必等人。修完由调用方重建+复检。
+ * @param job
+ * @param opts { title 违规类别中文名, evidence 证据行数组, rule 强制规范提示 }
+ */
+export async function repairFromEvidence(job, { title, evidence, rule }) {
+  const skill = config.skills.webVideoPresentation;
+  const prompt = [
+    `当前目录是 VideoForge 网页演示项目。确定性质量检查发现「${title}」，必须直接修改 presentation 代码修复，不要只解释。`,
+    `必须重读 ${skill}/references/CHAPTER-CRAFT.md 并把它当作硬性标准。`,
+    `违规证据（已精确定位，逐条修复）：`,
+    ...evidence.map((line, i) => `  ${i + 1}. ${line}`),
+    rule ? `修复要求：${rule}` : "",
+    `只改与违规直接相关的文件；如结构变化需同步 chapters.ts / narrations.ts / useStepper STORAGE_KEY。`,
+    `完成后运行 npx tsc --noEmit。不要向用户提问，修完即退出。`,
+  ].filter(Boolean).join("\n");
+  return runAgent({
+    jobId: job.id,
+    stage: "quality_repair",
+    cwd: job.workspace,
+    prompt,
+    usageOperation: "deterministic-repair",
   });
 }
 

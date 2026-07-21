@@ -1,13 +1,14 @@
 import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { db, getJob, logEvent, updateJob } from "../db.js";
-import { nextStage, repairChapterQuality, runStage, stageDef } from "../stages.js";
+import { nextStage, repairChapterQuality, repairFromEvidence, runStage, stageDef } from "../stages.js";
 import { buildPresentation } from "../preview.js";
 import { auditPreviewQuality, inspectPreviewQuality } from "../render.js";
 import { defectSummary, recordQualityEntry } from "../qualityLedger.js";
 import { lintChapters, lintDefectSummary, lintEvidence } from "../chapterLint.js";
 import { cameraEvidence, validateCameraCues } from "../cameraCheck.js";
 import { choreographCameras } from "../cameraChoreographer.js";
+import { runEffectScore } from "../effectScoreRunner.js";
 import { config } from "../config.js";
 import { preflightWarnings } from "../preflight.js";
 
@@ -75,14 +76,25 @@ async function advance(jobId) {
           // 静态 linter 执法模式（2026-07-16 转正：7 个满分作品实测零误伤）：
           // error 级违规直接判章节生成失败并给出毫秒级归因证据；warn 只记账。
           try {
-            const lint = lintChapters(join(getJob(jobId).workspace, "presentation"));
-            writeFileSync(join(getJob(jobId).workspace, "presentation", "public", "quality-lint.json"), `${JSON.stringify(lint, null, 2)}\n`);
+            const presDir = () => join(getJob(jobId).workspace, "presentation");
+            // 静态规则（字号/媒体裸放等）：error 违规先自动回喂修复（≤2 轮），
+            // 仍不过才判失败（2026-07-20：把"失败等人工点重试"升级为自动闭环）。
+            let lint = lintChapters(presDir());
+            writeFileSync(join(presDir(), "public", "quality-lint.json"), `${JSON.stringify(lint, null, 2)}\n`);
             if (lint.findings.length) {
               recordQualityEntry({ kind: "lint", jobId, errors: lint.errors, warnings: lint.warnings, defects: lintDefectSummary(lint) });
               logEvent(jobId, "quality", `静态规则：${lint.errors} 处违规、${lint.warnings} 处提醒（详见 quality-lint.json）`, lint.errors ? "error" : "info");
             }
+            for (let attempt = 1; lint.errors > 0 && attempt <= 2; attempt += 1) {
+              logEvent(jobId, "quality", `静态规则 ${lint.errors} 处违规，自动第 ${attempt}/2 次回喂修复`, "warning");
+              const fixed = await repairFromEvidence(getJob(jobId), { title: "章节静态规则违规", evidence: lintEvidence(lint, 8), rule: "字号≥20px、颜色/字体走主题 token、截图媒体必须包 <MediaFrame> 不得裸放" });
+              if (!fixed.ok) break;
+              await buildPresentation(getJob(jobId));
+              lint = lintChapters(presDir());
+              recordQualityEntry({ kind: "lint", jobId, phase: `repair-${attempt}`, errors: lint.errors, warnings: lint.warnings, defects: lintDefectSummary(lint) });
+            }
             if (lint.errors > 0) {
-              throw new Error(`静态规则 ${lint.errors} 处违规：${lintEvidence(lint, 3).join("；")}（确定性检查，重试本环节会重新生成）`);
+              throw new Error(`静态规则 ${lint.errors} 处违规（已自动修复仍未过）：${lintEvidence(lint, 3).join("；")}`);
             }
             let cameraDensity = "dense";
             let avatarEnabled = false;
@@ -95,7 +107,7 @@ async function advance(jobId) {
             // 走查真实 DOM 按信号编排，AI 有意声明的镜头保留、机器补齐到下限
             try {
               const plan = await choreographCameras(
-                join(getJob(jobId).workspace, "presentation"),
+                presDir(),
                 `http://127.0.0.1:${config.port}/preview/${jobId}/`,
                 { density: cameraDensity, avatarEnabled },
               );
@@ -104,10 +116,19 @@ async function advance(jobId) {
             } catch (choreoError) {
               logEvent(jobId, "quality", `镜头编排未能运行（保留 AI 声明）：${choreoError.message}`, "warning");
             }
-            const camera = validateCameraCues(join(getJob(jobId).workspace, "presentation"), { density: cameraDensity });
+            // 镜头声明：error 违规同样自动回喂修复（≤2 轮）再判失败
+            let camera = validateCameraCues(presDir(), { density: cameraDensity });
+            for (let attempt = 1; !camera.pass && attempt <= 2; attempt += 1) {
+              recordQualityEntry({ kind: "camera-check", jobId, phase: `repair-${attempt}`, errors: camera.errors, defects: { "camera-violation": camera.errors } });
+              logEvent(jobId, "quality", `镜头声明 ${camera.errors} 处违规，自动第 ${attempt}/2 次回喂修复`, "warning");
+              const fixed = await repairFromEvidence(getJob(jobId), { title: "镜头声明违规", evidence: cameraEvidence(camera, 8), rule: "只用词表内 effect；focus/pan/spotlight 必带真实 target；zoom∈[1.1,3.0]、focus≥1.4；每章内容镜头≤密度预算；whip 每章≤1" });
+              if (!fixed.ok) break;
+              await buildPresentation(getJob(jobId));
+              camera = validateCameraCues(presDir(), { density: cameraDensity });
+            }
             if (!camera.pass) {
               recordQualityEntry({ kind: "camera-check", jobId, errors: camera.errors, defects: { "camera-violation": camera.errors } });
-              throw new Error(`镜头声明 ${camera.errors} 处违规：${cameraEvidence(camera, 3).join("；")}（确定性检查，重试本环节会重新生成）`);
+              throw new Error(`镜头声明 ${camera.errors} 处违规（已自动修复仍未过）：${cameraEvidence(camera, 3).join("；")}`);
             }
           } catch (lintError) {
             if (/处违规/.test(lintError.message)) throw lintError;
@@ -132,6 +153,35 @@ async function advance(jobId) {
             throw new Error(`逐屏画面验收仅 ${audit.score}/100，低于 90 分${worst ? `；最低分为第 ${worst.chapter + 1} 章第 ${worst.step + 1} 屏` : ""}。已保留最低分截图，未进入人工验收。`);
           }
           logEvent(jobId, "quality", `结构质量门禁通过：${audit.score}/100，共检查 ${audit.checkedSteps} 屏${audit.screenshotsCaptured ? `，留存 ${audit.screenshotsCaptured} 张问题复核截图` : "，无需截图修复"}`);
+          // 效果打分（博主质感维）：结构分只管"不出错"，本器管"够不够博主水准"
+          // （fx密度/强效果占比/平淡游程/切字）。默认只记账校准；config.effectScore.gate
+          // 开启且低于 minScore 时，触发一次效果向自动修复。
+          if (config.effectScore?.enabled) {
+            try {
+              const es = await runEffectScore(jobId, { port: config.port });
+              if (!es.ok) {
+                logEvent(jobId, "quality", `效果打分未能运行：${es.note}`, "warning");
+              } else {
+                const { score, defects = [], dimensions = {} } = es.card;
+                recordQualityEntry({ kind: "effect-score", jobId, score, dimensions, defects: { "effect-defect": defects.length } });
+                logEvent(jobId, "quality", `效果打分：${score}/100${defects.length ? `——${defects.slice(0, 4).join("；")}` : "（博主质感达标）"}`, score < (config.effectScore.minScore ?? 72) ? "warning" : "info");
+                if (config.effectScore.gate && score < (config.effectScore.minScore ?? 72) && defects.length) {
+                  logEvent(jobId, "quality", `效果分低于门禁 ${config.effectScore.minScore}，自动回喂效果向修复`, "warning");
+                  const fixed = await repairFromEvidence(getJob(jobId), { title: "博主质感不足（效果打分未达标）", evidence: defects.slice(0, 8), rule: "屏上数字用 <Counter>/<Slam> 且传 word 触发；每章≥2 处 <WordMark>；关键结论/对比用 <Annotate>/<Shine>；强推近(focus/magnify)踩在关键数字步；截图包 <MediaFrame>" });
+                  if (fixed.ok) {
+                    await buildPresentation(getJob(jobId));
+                    const es2 = await runEffectScore(jobId, { port: config.port });
+                    if (es2.ok) {
+                      recordQualityEntry({ kind: "effect-score", jobId, phase: "repair-1", score: es2.card.score, dimensions: es2.card.dimensions, defects: { "effect-defect": (es2.card.defects || []).length } });
+                      logEvent(jobId, "quality", `效果修复后：${es2.card.score}/100`, "info");
+                    }
+                  }
+                }
+              }
+            } catch (esError) {
+              logEvent(jobId, "quality", `效果打分异常：${esError.message}`, "warning");
+            }
+          }
         } catch (error) {
           result = { ok: false, note: `画面构建未通过，尚未进入验收：${error.message}` };
           updateJob(jobId, { status: "failed", error: result.note });

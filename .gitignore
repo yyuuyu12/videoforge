@@ -8,6 +8,7 @@ workspaces/*
 !workspaces/package.json
 !workspaces/package-lock.json
 *.log
+logs/
 .playwright-cli/
 *.tsbuildinfo
 output/

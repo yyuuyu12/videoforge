@@ -11,7 +11,7 @@
     "server": "node --watch server/src/index.js",
     "dashboard": "npm run dev --workspace dashboard",
     "build": "npm run build --workspace dashboard",
-    "test": "node --test server/src/*.test.js",
+    "test": "node --import ./server/test-setup.js --test server/src/*.test.js",
     "start": "node server/src/index.js"
   }
 }
