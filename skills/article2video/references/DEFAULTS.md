@@ -36,8 +36,8 @@
 
 | 项 | 定稿值 | 出处 |
 |---|---|---|
-| 布局 | **右侧竖屏大窗口**：360×640（1920×1080 stage 坐标系）、圆角 28px、`right: 40px`、垂直居中。不用右下角小圆窗 | ai-market-video，用户截图指定 |
-| 正文避让 | `base.css` 的 `--stage-pad-x-end: 420px`（右侧留白给头像窗） | ai-market-video |
+| 布局 | **右侧竖屏大窗口**：277×493（1920×1080 stage 坐标系）、圆角 28px、右锚定、垂直居中。不用右下角小圆窗 | 2026-07-17 用户拍板（252×448 基础上"再大 10%"），取代 ai-market-video 时期 360×640 旧值 |
+| 正文避让 | `--stage-pad-x-end: 480px`（right-third 位；其余位 392px），由 avatar_wire 写入 `registry/avatarConfig.ts` 驱动 | 2026-07-17 拍板同批定稿 |
 | 素材 | 竖屏出镜视频（1440×2560 已验证），乒乓母版用 **concat filter 重编码**（不能 demuxer 流拷贝 reverse 片段） | ai-market-video |
 | 分段 | **~10s 一段**（上限 13s），step 粒度贪心打包，可跨章节；切片游标只进不退 + **跳避乒乓翻转点** | ai-market-video，用户指定 10s |
 | offset | **交叉相关**（step 音频 vs 模型输出自带音频轨），置信度 <0.7 才退比例估算（每段末步会退化，正常） | ai-market-video |

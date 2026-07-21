@@ -1,5 +1,73 @@
 # VideoForge 项目记忆
 
+## 2026-07-22 结构审计管辖权定稿 + v2b 端到端验证跑
+
+- **审计管辖权铁律：结构审计只对"落定素颜版式"负责，镜头运动质量归 effectScore**。job-30 验证跑
+  暴露假 0 分链：镜头推近/呼吸层的变换本来就该越出视口，走查节奏（120ms/步）一旦踩中镜头生效
+  窗口，溢出/碰撞全是误报。**job-27 时代拿 100 的真相是走查快于镜头/入场动画的生效窗口——审计
+  一直在测"未显影的页面"，等于系统性漏检**。修复：①审计页注入样式中和 `.camera-layer/.camera-punch/
+  .camera-breath` 变换；②每步测量前 `document.getAnimations().finish()` 把 scene-lift/whip 等动画
+  结算到终态（无限循环动画退 cancel）。首次诚实满显影测量 = job-27 回归 100/100 零误伤。
+- **视觉检查三条校准**（首次接触满显影真实内容暴露的边界）：①幽灵底文豁免——低有效不透明度
+  （≤0.55，含 3 层祖先连乘）**或**前景色对背景对比度 <3:1（WCAG 大字下限，主题无关）判"退后层"，
+  与主体重叠是设计语言（rh-ghost×大数字）不计碰撞；②纯符号装饰（→/斜杠等，无字母数字汉字）骑
+  容器边界是图示设计，不计 containerOverflow；③全出血背景媒体（≥70% 舞台面积，host-full 模糊填充
+  视频）不是"内容媒体"，文字压背景是电影式设计不计 textOnMedia。校准后 job-30 审计只剩 1 个真缺陷
+  （Counter 词触发件压卡片+溢出图表容器——审计抓对了）。
+- **审计证据机器可读化**：collisionPairs（谁压谁+重叠面积）与 containerOverflowDetails（哪个叶子
+  撑破哪个容器）进 quality-audit.json，修复回喂从"看截图猜"升级为"按选择器名单修"。
+- **agentRunner 网络层容错**：`fetch` 抛错（fetch failed/AbortSignal 超时）原来直接冲出重试循环杀死
+  整个阶段（job-30 修复轮实撞）；现与 HTTP 5xx 同等待遇，2s/4s 退避重试 3 次再判死。
+- **Counter 前后缀正斜混排根治**（人眼校验 job-30 抓出，DOM 盒检测不可见的字形级缺陷）：
+  `--hero-num-font` 类斜体英文展示字体缺 ¥/％/中文字形 → 回退字体正体渲染、度量不同，斜体数字
+  负侧边距直接压进回退字形（"¥2" 互压成一团）。修复：Counter 的 prefix/suffix 独立
+  `.fx-counter__affix` span，`font-style:normal` + `margin-inline:0.06em`。三真源同步
+  （garden-skills/videoforge 快照/存量工作区）。**教训：字形级缺陷只有真实截图人眼看才能抓，
+  DOM 盒检查对单文本运行内的字距问题天然失明——每轮新效果件验证必须含真节奏截图走查**。
+- **v2b 端到端验证结论（job-30，gpt-5.6-sol 全自动）**：重生成 196s → 编排器 15 镜头 → 审计 80 抓真
+  缺陷（Counter 词触发件压卡片）→ 自动修复 1 轮 → 100/100 过门 → effectScore 95 只记账，全程零人工。
+  19 步真节奏走查：镜头全部正常生效回位（magnify2.8/focus1.45-2.2/pan1.2），修复步版式意图保留。
+  MediaFrame/whip 本作未触发（无位图媒体、数字人关闭），视觉验收随下一个带媒体/数字人的作品补。
+- **DEFAULTS 数字人尺寸裁定落地**：按 2026-07-17 用户拍板统一为 277×493/reserve480，DEFAULTS.md
+  正文更正（旧值 360×640/420 是 ai-market-video 时期）、defaults.json 去除争议标记、defaults.test.js
+  锁定该维（文本断言守卫 stages.js 与模板 avatarConfig.ts），claude-skills 源库同步提交。
+
+## 2026-07-20 竞品动效对标批次（效果 v2b）+ 节奏对齐口播
+
+- **竞品实证转场纪律**（逐帧分析 10 条知识类博主片、40 个切换点）：切本身 85%+ 是硬切，
+  **零交叉淡化、零滑动**——句级永远硬切；"人↔素材"情绪升档边界用甩切（whip，径向 scale+blur
+  冲击 ~190ms）；章节级才允许仪式动作。动画预算全押"切后 1 秒的分层入场"（先框架后数据）。
+- 效果 v2b 新件：`enter:"whip"`（CameraCue 正交字段，每章 ≤1，cameraCheck 强制；编排器自动在
+  非首章的数字人/章节卡章首布点）、`MediaFrame`（截图/屏录永不裸放：描边浮卡+角标+暗角+框内
+  Ken Burns+3D 倾角，chapterLint `bare-media` warn 记账）、ChapterCard `anchor` 变体（选中框
+  描边生长+锚点弹入，竞品签名动作）与 `exit` 谢幕、Counter `colorRamp` 随值变色、`.scene-lift`
+  场景提亮。effectScore 词表同步收录（fx.media、whipCount 维度）。
+- **特效节奏对齐口播的机制定稿**：cue 数据升级为字级时间轴（`charMs`，gen-subtitle-cues 从
+  words.json 逐字产出，subtitleCheck 校验与文本逐字对齐）；`useSpeechTrigger` 统一时钟 hook，
+  Counter/Slam/Shine/Annotate 均支持 `word` 触发词（旁白念到才播），WordMark 升级字级精度
+  （点亮时刻 = 该词首字真实开口时刻，原来只有句级 cue 精度、误差最大 2.5s）。写死毫秒 delay
+  只做同拍内错峰。
+- **字幕静默劣化升为门禁**：有音频却无 cue 的 step（TTS 未返回 words.json）以前只 warn，播放层
+  会退化成 1800ms 墙钟轮换=必然不同步；现 subtitleCheck 判 `step-silent-fallback` error，阶段失败
+  要求重跑音频合成。无音频过场步保持 warn。
+- **render 结构分补三个盲区**：文字压位图媒体（textOnMedia，svg 豁免——手绘图表标签叠放是设计内；
+  figcaption/数字人窗豁免）、字撑破有形容器（containerOverflow，视口内也算破版）、短标签意外
+  换行（wrapViolations，≤16 字被挤成两行）。原碰撞检测只算"双方都有文字"，文字压图从此不再被放过。
+- effectScore.mjs 路径改走 config.workspacesRoot（B2 纪律，原来硬编码 cwd/workspaces）。
+- **质量闭环 P0（把"测量代码在仓库但靠人跑"补成自动闭环）**：①effectScore 从孤儿 CLI 接进
+  chapter_gen 后管线（`effectScoreRunner.js` 子进程跑并解析打分卡，`config.effectScore` gate 默认
+  false=只记账校准，稳定后开门禁触发效果向修复）；②lint/camera error 自动回喂模型修复 ≤2 轮再判
+  失败（`stages.repairFromEvidence`，证据精确到文件+行号），不再只判失败等人工点重试；③`ledgerStats`
+  复发缺陷（30 天≥2 次）回流注入 chapter_gen prompt 当"病历"；④个人定稿机器可读化
+  `skills/article2video/references/defaults.json` + `defaults.test.js` 一致性守卫（锁语速 1.12/音色/
+  字幕上限 10，防 server 默认漂移）。测试 60 项全绿。
+- **生成引擎真相 + SSE 修复**：本机 API 模式实配 = OpenAI 兼容代理、模型 `gpt-5.6-sol`（非 Claude，
+  印证用户"工作台搭载其他模型"）。agentRunner "上游返回非 JSON 响应（data:{...chat.completion.chunk}）"
+  根因 = 上游默认 SSE 流式而代码按整体 JSON 解析；修复：请求带 `stream:false` + `parseChatCompletion`
+  兼容两类上游（SSE 时按 index 聚合 tool_calls 的 name/arguments）。
+- ~~悬而未决~~（两项均已在 2026-07-22 批次解决，见上一节）：①验证跑 job-30 →已完成端到端校验并
+  顺带根治审计假 0 分与 fetch 容错两缺陷；②DEFAULTS 数字人尺寸冲突 → 按 2026-07-17 拍板统一并锁测试。
+
 ## 2026-07-17 效果系统定稿：放置机制与密度纪律
 
 - **"什么地方加什么效果"由三个信号源决定**（生成时 AI 按契约执行、校验器把关、审计兜底）：

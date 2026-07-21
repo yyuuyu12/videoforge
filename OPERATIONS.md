@@ -11,6 +11,18 @@ npm run build
 npm start
 ```
 
+推荐的手动稳定启动方式（不会注册开机自启）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\start-videoforge.ps1
+```
+
+脚本会检查 5401 端口、必要时构建 Dashboard、后台启动服务并等待 `/api/health` 通过；日志写入 `logs/videoforge-server.out.log` 和 `logs/videoforge-server.err.log`。停止服务：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\stop-videoforge.ps1
+```
+
 地址：`http://localhost:5401`。生产构建由 Express 直接提供，不需要另开 Dashboard 端口。
 
 服务端一键成片（导出环节）额外依赖：本机安装 Chrome 或 Edge（渲染器经 playwright-core 调用系统浏览器，无需下载浏览器内核）。源码开发环境要求 ffmpeg/ffprobe 在 PATH；便携包已内置两者。渲染临时帧写在 `workspaces/job-N/render-tmp/`（成功后自动清理，失败保留现场），成片在 `workspaces/job-N/output.mp4`。

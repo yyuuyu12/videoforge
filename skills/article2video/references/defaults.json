@@ -1,0 +1,23 @@
+{
+  "_note": "个人定稿参数的机器可读镜像（DEFAULTS.md 是人读真源，本文件供 server 一致性测试消费，防止代码默认值悄悄漂移）。改动需用户主动提出。",
+  "tts": {
+    "provider": "minimax-http",
+    "model": "speech-2.8-hd",
+    "voiceId": "GongheJiucun02",
+    "speed": 1.12,
+    "apiKeyEnv": "MINIMAX_API_KEY"
+  },
+  "subtitle": {
+    "targetChars": 8,
+    "hardMaxChars": 10
+  },
+  "avatar": {
+    "windowWidthPx": 277,
+    "windowHeightPx": 493,
+    "reservePx": 480
+  },
+  "theme": {
+    "techTutorial": "midnight-press",
+    "news": "newsroom"
+  }
+}

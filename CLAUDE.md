@@ -20,10 +20,12 @@ npm run server / npm run dashboard          # 开发：API :5401 + Vite :5400
 - `server/src/agentRunner.js` — 生成引擎三路径：订阅模式走 Claude Agent SDK（主）→ `claude -p`（兜底）；API 模式走 OpenAI 兼容工具循环
 - `server/src/douyin.js` — TikHub、原声选择、Whisper、完整性校验
 - `server/src/devServers.js` — 按作品分配 :5300-5399 预览端口
-- **质量线四件**：`chapterLint.js`（章节静态执法：字号/写死颜色/超长文本）、`subtitleCheck.js`（字幕契约：≤10 字/时间递增/尾标点）、`cameraCheck.js`（镜头声明：词表/倍率/密度档位预算）、`qualityLedger.js`（质量账本 JSONL + 回写铁律统计）
+- **质量线五件**：`chapterLint.js`（章节静态执法：字号/写死颜色/超长文本/截图裸放）、`subtitleCheck.js`（字幕契约：≤10 字/时间递增/尾标点/字级时间轴对齐）、`cameraCheck.js`（镜头声明：词表/倍率/密度档位预算/whip 甩切预算）、`effectScore.mjs` + `effectScoreRunner.js`（博主质感打分：fx密度/强效果占比/平淡游程/切字，已接进 chapter_gen 后管线，`config.effectScore.gate` 默认 false=只记账校准）、`qualityLedger.js`（质量账本 JSONL + 回写铁律统计，`ledgerStats` 复发缺陷已回流注入 chapter_gen prompt）
+- **确定性检验失败自动回喂修复**（2026-07-20）：pipeline 里 lint/camera error 各自动回喂模型修复 ≤2 轮再判失败（`stages.repairFromEvidence`）；结构分 3 轮截图修复照旧
 - **对话修改三件**：`feedbackRouter.js`（意图路由：同步类→重跑管线不进 Agent）、`feedbackTransaction.js`（受保护事务：快照/白名单/门禁对比/自动回滚）、agentRunner 的 feedbackEngine 选路
 - **运维两件**：`preflight.js`（依赖服务状态与开工预警）、`servicesControl.js`（模型服务一键启停，设置页按钮）
-- **效果系统**（模板层，见 skills 模板 `src/components/`）：`CameraLayer`（镜头四原语+magnify+呼吸微推层）、`AvatarPresenter`（播放+微调同步、host/host-full 数字人时刻、全屏模糊填充）、`effects/`（WordMark 跟读高亮、Counter、Annotate、QuoteCard 金句卡、ChapterCard 章节转场卡、Shine 扫光、Slam 大数字重锤）；声明入口 `registry/cameraCues.ts`
+- **生成引擎**（`agentRunner.js`）：订阅模式走 Claude Agent SDK/`claude -p`；**API 模式走 OpenAI 兼容工具循环**（本机实配 = OpenAI 兼容代理，模型 `gpt-5.6-sol`，非 Claude）。`parseChatCompletion` 兼容非流式 JSON 与 SSE 流式（请求带 `stream:false`，上游仍强推 SSE 时按 index 聚合 tool_calls）——2026-07-20 修复"上游返回非 JSON 响应"根因
+- **效果系统 v2b**（2026-07-20 竞品动效对标增补：`enter:"whip"` 甩切与 effect 正交只给"人↔素材"边界、`MediaFrame` 截图容器 chapterLint 禁裸放、`useSpeechTrigger` 让 Counter/Slam/Shine/Annotate 传 word 踩口播节拍、WordMark 升字级精度、ChapterCard anchor/exit、Counter colorRamp、`scene-lift` 分层入场；模板层，见 skills 模板 `src/components/`）：`CameraLayer`（镜头四原语+magnify+呼吸微推层+whip 甩切冲击层）、`AvatarPresenter`（播放+微调同步、host/host-full 数字人时刻、全屏模糊填充）、`effects/`（WordMark 跟读高亮、Counter、Annotate、QuoteCard 金句卡、ChapterCard 章节转场卡（anchor 变体/exit 谢幕）、Shine 扫光、Slam 大数字重锤、MediaFrame 媒体容器、useSpeechTrigger 口播触发时钟——Counter/Slam/Shine/Annotate 支持 word 触发词对齐口播节拍）；声明入口 `registry/cameraCues.ts`（effect + enter:"whip"）；服务端确定性编排 `cameraChoreographer.js`、效果打分 CLI `effectScore.mjs`
 - `dashboard/src/pages/Workbench.tsx` — 七阶段工作台；`NewWork.tsx` 内容入口；`Settings.tsx` 服务配置（含模型服务启停卡）
 - `skills/` — 随仓库提交的方法论快照（产品 prompt 的真源，见下"skills 规则"）
 
