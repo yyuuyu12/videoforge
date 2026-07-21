@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
-import { extname, join } from "node:path";
+import { extname, join, relative, resolve } from "node:path";
 import { config } from "./config.js";
 import { logEvent, recordUsage } from "./db.js";
 import { loadSettings } from "./settings.js";
@@ -16,6 +16,15 @@ const queue = [];
  * 并发写同一份文件（job-2 实测踩过：一个 stage 连开 3 个孤儿 agent）。
  */
 const liveChildren = new Set();
+
+/** Return whether a path is inside the configured per-job workspace root. */
+export function isWorkspacePath(path) {
+  if (!path || !config.workspacesRoot) return false;
+  const root = resolve(config.workspacesRoot);
+  const full = resolve(path);
+  const rel = relative(root, full);
+  return rel === "" || (!rel.startsWith("..") && !rel.includes(":"));
+}
 
 function reportProgress(jobId, stage, onProgress, percent, message) {
   onProgress(percent, message);
@@ -66,6 +75,12 @@ export function ensureWorkspaceTrusted(cwd) {
  * Returns { ok, output } — output is combined text tail for logging.
  */
 export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation, imagePaths = [], engine }) {
+  if (!isWorkspacePath(cwd)) {
+    return Promise.resolve({ ok: false, output: "", note: "Agent 工作目录必须位于作品工作区内" });
+  }
+  if (imagePaths.some((path) => !isWorkspacePath(path))) {
+    return Promise.resolve({ ok: false, output: "", note: "Agent 附件路径必须位于作品工作区内" });
+  }
   // engine 覆盖（subscription|api）；auto/缺省沿用全局 llm.mode
   const mode = engine && engine !== "auto" ? engine : loadSettings().llm.mode;
   if (mode === "api") {
@@ -264,6 +279,62 @@ const API_TOOLS = [
   { type: "function", function: { name: "run_command", description: "在工作区中运行必要的项目命令，例如 npm install、tsc 或构建检查", parameters: { type: "object", properties: { command: { type: "string" } }, required: ["command"] } } },
 ];
 
+/**
+ * 解析 chat/completions 响应，兼容非流式 JSON 与 SSE 流式两种上游。
+ * 我们请求时已带 stream:false，但部分 OpenAI 兼容代理（如本机 gpt-5.6-sol）
+ * 仍强制返回 text/event-stream；此时把增量块聚合回完整的非流式消息结构
+ * （content 拼接 + tool_calls 按 index 合并 name/arguments），使工具循环
+ * 对两类上游都能工作。返回 {ok, data} 或 {ok:false, error}。
+ */
+export function parseChatCompletion(responseText, contentType = "") {
+  const text = String(responseText || "").trim();
+  if (!text) return { ok: false, error: "空响应体" };
+  // 先尝试整体 JSON（非流式）
+  if (!/^data:/m.test(text) && !/event-stream/i.test(contentType)) {
+    try { return { ok: true, data: JSON.parse(text) }; } catch { /* 落到 SSE 解析 */ }
+  }
+  // SSE 聚合
+  const chunks = [];
+  for (const rawLine of text.split(/\r?\n/)) {
+    const line = rawLine.trim();
+    if (!line.startsWith("data:")) continue;
+    const payload = line.slice(5).trim();
+    if (!payload || payload === "[DONE]") continue;
+    try { chunks.push(JSON.parse(payload)); } catch { /* 跳过不完整块 */ }
+  }
+  if (!chunks.length) {
+    // 既非合法 JSON 也非可解析 SSE：尝试最后一次整体解析给出原始错误
+    try { return { ok: true, data: JSON.parse(text) }; }
+    catch { return { ok: false, error: `无法解析上游响应：${text.replace(/\s+/g, " ").slice(0, 180)}` }; }
+  }
+  let content = "";
+  const toolCalls = []; // 按 index 合并
+  let finishReason = null;
+  let usage = null;
+  let role = "assistant";
+  for (const chunk of chunks) {
+    if (chunk.usage) usage = chunk.usage;
+    const choice = chunk.choices?.[0];
+    if (!choice) continue;
+    if (choice.finish_reason) finishReason = choice.finish_reason;
+    // 流式在 delta，非流式（有些代理混发）在 message
+    const delta = choice.delta ?? choice.message ?? {};
+    if (delta.role) role = delta.role;
+    if (typeof delta.content === "string") content += delta.content;
+    for (const tc of delta.tool_calls ?? []) {
+      const idx = tc.index ?? toolCalls.length;
+      toolCalls[idx] ??= { id: tc.id, type: "function", function: { name: "", arguments: "" } };
+      if (tc.id) toolCalls[idx].id = tc.id;
+      if (tc.function?.name) toolCalls[idx].function.name = tc.function.name;
+      if (tc.function?.arguments) toolCalls[idx].function.arguments += tc.function.arguments;
+    }
+  }
+  const message = { role, content: content || null };
+  const assembled = toolCalls.filter(Boolean);
+  if (assembled.length) message.tool_calls = assembled;
+  return { ok: true, data: { choices: [{ message, finish_reason: finishReason }], usage } };
+}
+
 async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation, imagePaths = [] }) {
   const { llm } = loadSettings();
   logEvent(jobId, stage, `API agent start (${llm.provider}/${llm.model})`);
@@ -291,27 +362,32 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
       let response;
       let responseText = "";
       for (let attempt = 0; attempt < 3; attempt++) {
-        response = await fetch(`${llm.baseUrl.replace(/\/$/, "")}/chat/completions`, {
-          method: "POST",
-          headers: { authorization: `Bearer ${llm.apiKey}`, "content-type": "application/json" },
-          body: JSON.stringify({ model: llm.model, messages, tools: API_TOOLS, tool_choice: "auto", max_tokens: 8192 }),
-          signal: AbortSignal.timeout(180000),
-        });
-        responseText = await response.text();
-        if (response.status < 500 || attempt === 2) break;
-        const waitMs = 1500 * (attempt + 1);
+        // 网络层异常（fetch failed / AbortSignal 超时）与 HTTP 5xx 同等待遇：
+        // 退避重试后再判死。2026-07-22 根治：job-30 修复轮撞上游瞬断，一次
+        // fetch failed 冲出循环直接杀掉整个阶段。
+        try {
+          response = await fetch(`${llm.baseUrl.replace(/\/$/, "")}/chat/completions`, {
+            method: "POST",
+            headers: { authorization: `Bearer ${llm.apiKey}`, "content-type": "application/json" },
+            body: JSON.stringify({ model: llm.model, messages, tools: API_TOOLS, tool_choice: "auto", max_tokens: 8192, stream: false }),
+            signal: AbortSignal.timeout(180000),
+          });
+          responseText = await response.text();
+          if (response.status < 500 || attempt === 2) break;
+          logEvent(jobId, stage, `upstream HTTP ${response.status}; retry ${attempt + 2}/3`, "error");
+        } catch (netError) {
+          if (attempt === 2) throw new Error(`上游连接失败（已重试 3 次）：${netError.cause?.message || netError.message}`);
+          logEvent(jobId, stage, `upstream fetch error: ${netError.message}; retry ${attempt + 2}/3`, "error");
+        }
+        const waitMs = 2000 * (attempt + 1);
         reportProgress(jobId, stage, onProgress, Math.min(76, 28 + turn * 4), `上游暂时不可用，正在第 ${attempt + 2}/3 次重试`);
-        logEvent(jobId, stage, `upstream HTTP ${response.status}; retry ${attempt + 2}/3`, "error");
         await new Promise((resolve) => setTimeout(resolve, waitMs));
       }
-      let data;
+      let data = {};
       let responseParseError = "";
-      try {
-        data = JSON.parse(responseText);
-      } catch {
-        data = {};
-        responseParseError = `上游返回非 JSON 响应（HTTP ${response.status}）：${responseText.replace(/\s+/g, " ").slice(0, 180)}`;
-      }
+      const parsed = parseChatCompletion(responseText, response.headers.get("content-type") || "");
+      if (parsed.ok) data = parsed.data;
+      else responseParseError = `上游返回非 JSON 响应（HTTP ${response.status}）：${parsed.error}`;
       recordUsage({
         service: "llm",
         operation: usageOperation || `agent:${stage}`,

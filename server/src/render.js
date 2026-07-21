@@ -63,6 +63,38 @@ async function inspectVisualQuality(page) {
         cls: String(el.className || ""),
         text: (el.textContent || "").trim().slice(0, 80),
         r: (() => { const r = el.getBoundingClientRect(); return { x: r.x, y: r.y, w: r.width, h: r.height }; })(),
+        // 退后层识别（幽灵底文/装饰字）：低有效不透明度（≤3 层祖先连乘）
+        // 或前景色对背景对比度 <3:1（WCAG 大字下限以下 = 装饰级，主题无关）
+        deemphasized: (() => {
+          let o = Number.parseFloat(getComputedStyle(el).opacity) || 1;
+          let node = el.parentElement;
+          for (let depth = 0; node && depth < 3; depth += 1, node = node.parentElement) {
+            o *= Number.parseFloat(getComputedStyle(node).opacity) || 1;
+          }
+          if (o <= 0.55) return true;
+          const parse = (c) => {
+            const m = String(c).match(/rgba?\(([^)]+)\)/);
+            if (!m) return null;
+            const [r, g, b, a = 1] = m[1].split(",").map(Number);
+            return { r, g, b, a };
+          };
+          const lum = ({ r, g, b }) => {
+            const f = (v) => { v /= 255; return v <= 0.03928 ? v / 12.92 : ((v + 0.055) / 1.055) ** 2.4; };
+            return 0.2126 * f(r) + 0.7152 * f(g) + 0.0722 * f(b);
+          };
+          const fg = parse(getComputedStyle(el).color);
+          if (!fg) return false;
+          let bgNode = el;
+          let bg = null;
+          while (bgNode && bgNode !== document.documentElement) {
+            const c = parse(getComputedStyle(bgNode).backgroundColor);
+            if (c && c.a > 0.01) { bg = c; break; }
+            bgNode = bgNode.parentElement;
+          }
+          if (!bg) return false;
+          const [hi, lo] = [lum(fg), lum(bg)].sort((a, b) => b - a);
+          return (hi + 0.05) / (lo + 0.05) < 3;
+        })(),
       }));
     const overlap = (a, b) => {
       const x = Math.max(0, Math.min(a.r.x + a.r.w, b.r.x + b.r.w) - Math.max(a.r.x, b.r.x));
@@ -70,6 +102,7 @@ async function inspectVisualQuality(page) {
       return x * y;
     };
     let collisions = 0;
+    const collisionPairs = []; // 修复回喂的靶子：谁压了谁（截图之外的机器可读证据）
     for (let i = 0; i < boxes.length; i += 1) for (let j = i + 1; j < boxes.length; j += 1) {
       // Parent containers and their text descendants occupy the same pixels by
       // design; counting those pairs makes otherwise valid slides fail audit.
@@ -78,8 +111,17 @@ async function inspectVisualQuality(page) {
       // diagrams. Only treat an intersection as a readability collision when
       // both sides contain visible text; structural overflow is audited below.
       if (!boxes[i].text || !boxes[j].text) continue;
+      // 幽灵底文豁免（2026-07-22 校准）："其余信息主动退后"式的退后层与
+      // 主体重叠是设计语言（如 rh-ghost×大数字），不伤可读性。
+      if (boxes[i].deemphasized || boxes[j].deemphasized) continue;
       const area = overlap(boxes[i], boxes[j]);
-      if (area > 80 && area / Math.min(boxes[i].r.w * boxes[i].r.h, boxes[j].r.w * boxes[j].r.h) > 0.15) collisions += 1;
+      if (area > 80 && area / Math.min(boxes[i].r.w * boxes[i].r.h, boxes[j].r.w * boxes[j].r.h) > 0.15) {
+        collisions += 1;
+        if (collisionPairs.length < 5) {
+          const label = (b) => `${b.tag}${b.cls ? `.${b.cls.split(/\s+/)[0]}` : ""}«${b.text.slice(0, 14)}»`;
+          collisionPairs.push({ a: label(boxes[i]), b: label(boxes[j]), area: Math.round(area) });
+        }
+      }
     }
     const subtitle = boxes.filter((b) => /subtitle|caption/i.test(b.cls));
     const subtitleSafe = subtitle.every((b) => b.r.y >= 0 && b.r.y + b.r.h <= innerHeight - 20);
@@ -94,6 +136,59 @@ async function inspectVisualQuality(page) {
     const contentLeaves = boxes.filter((b) => b.text && !/subtitle|caption/i.test(b.cls));
     const longestContentText = contentLeaves.reduce((max, b) => Math.max(max, b.text.replace(/\s+/g, "").length), 0);
     const longContentBlocks = contentLeaves.filter((b) => b.text.replace(/\s+/g, "").length > 28).length;
+    // 文字压图（2026-07-20 补盲区）：文字叶子盖在位图媒体（img/video/canvas）
+    // 上 = 不可读。svg 不算媒体（手绘图表的 HTML 标签叠放是设计内）；
+    // figcaption（媒体容器角标本来骑在边框上）与数字人窗内媒体豁免。
+    const mediaBoxes = [...document.querySelectorAll("img, video, canvas")]
+      .filter(visible)
+      .filter((el) => !el.closest(".avatar-presenter"))
+      // 全出血背景媒体豁免（2026-07-22 校准）：host-full 的模糊填充视频等
+      // 占满舞台的背景层不是"内容媒体"——文字压背景是电影式设计不是缺陷
+      .filter((el) => { const r = el.getBoundingClientRect(); return r.width * r.height < innerWidth * innerHeight * 0.7; })
+      .map((el) => { const r = el.getBoundingClientRect(); return { el, r: { x: r.x, y: r.y, w: r.width, h: r.height } }; });
+    let textOnMedia = 0;
+    for (const b of contentLeaves) {
+      if (b.tag === "FIGCAPTION" || b.el.closest("figcaption")) continue;
+      for (const m of mediaBoxes) {
+        if (m.el.contains(b.el) || b.el.contains(m.el)) continue;
+        const area = overlap(b, m);
+        if (area > 80 && area / Math.max(1, b.r.w * b.r.h) > 0.5) { textOnMedia += 1; break; }
+      }
+    }
+    // 字撑破容器（补盲区）：文字叶子超出最近的"有形容器"（带背景/边框的
+    // 卡片）边界 >6px——即使整体还在视口内也算破版。
+    let containerOverflow = 0;
+    const containerOverflowDetails = []; // 同 collisionPairs：给修复回喂的机器可读靶子
+    for (const b of contentLeaves) {
+      // 纯符号装饰（箭头/斜杠等连接件，无字母数字汉字）骑在容器边界上是
+      // 图示设计，不是"字撑破容器"（2026-07-22 校准：I«→» 误报）
+      if (!/[\p{L}\p{N}]/u.test(b.text)) continue;
+      let node = b.el.parentElement;
+      for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
+        const cs = getComputedStyle(node);
+        const boxed = cs.backgroundColor !== "rgba(0, 0, 0, 0)" || (Number.parseFloat(cs.borderTopWidth) || 0) > 0;
+        if (!boxed) continue;
+        const cr = node.getBoundingClientRect();
+        if (b.r.x < cr.left - 6 || b.r.x + b.r.w > cr.right + 6 || b.r.y < cr.top - 6 || b.r.y + b.r.h > cr.bottom + 6) {
+          containerOverflow += 1;
+          if (containerOverflowDetails.length < 5) {
+            containerOverflowDetails.push({
+              leaf: `${b.tag}${b.cls ? `.${b.cls.split(/\s+/)[0]}` : ""}«${b.text.slice(0, 14)}»`,
+              container: `${node.tagName}${node.className ? `.${String(node.className).split(/\s+/)[0]}` : ""}`,
+            });
+          }
+        }
+        break; // 只对最近的有形容器判定一次
+      }
+    }
+    // 短标签意外换行（补盲区）：≤16 字的标签/数字被 flex 挤成两行 =
+    // 布局被压缩的信号（正文长段落的多行是正常的，不在此列）。
+    const wrapViolations = contentLeaves.filter((b) => {
+      const chars = b.text.replace(/\s+/g, "").length;
+      if (chars < 2 || chars > 16) return false;
+      const lineHeight = Number.parseFloat(getComputedStyle(b.el).lineHeight);
+      return lineHeight > 0 && b.r.h / lineHeight >= 1.9;
+    }).length;
     const headingViolations = boxes.filter((b) => {
       if (!b.text || (!/^H[1-3]$/.test(b.tag) && !/headline|hero-title|main-title/i.test(b.cls))) return false;
       const style = getComputedStyle(b.el);
@@ -109,11 +204,15 @@ async function inspectVisualQuality(page) {
       - (subtitleMultiline ? 25 : 0)
       - longContentBlocks * 10
       - headingViolations.length * 20
+      - textOnMedia * 12
+      - containerOverflow * 8
+      - wrapViolations * 5
     ));
     return {
-      score, collisions, subtitleSafe, subtitleTextLength: subtitleText.length,
+      score, collisions, collisionPairs, subtitleSafe, subtitleTextLength: subtitleText.length,
       subtitleLines, subtitleTooLong, subtitleMultiline, longestContentText,
-      longContentBlocks, headingViolations, sampledElements: boxes.length,
+      longContentBlocks, headingViolations, textOnMedia, containerOverflow,
+      containerOverflowDetails, wrapViolations, sampledElements: boxes.length,
     };
   });
 }
@@ -133,6 +232,12 @@ async function inspectCurrentPreviewStep(page) {
   const audit = await page.evaluate(() => {
     const vw = window.innerWidth;
     const vh = window.innerHeight;
+    // 测量前把所有动画结算到终态（2026-07-22）：scene-lift 分层入场/whip 甩切
+    // 在 120ms 走查节奏下必然处于半路，元素中间位置互相压住 → 碰撞/容器溢出
+    // 全是瞬态误报。审计只对"落定版式"负责；finish 对无限循环动画会抛，退 cancel。
+    document.getAnimations?.().forEach((animation) => {
+      try { animation.finish(); } catch { animation.cancel(); }
+    });
     const offenders = [];
     for (const node of Array.from(document.querySelectorAll("body *"))) {
       if (!(node instanceof HTMLElement) || node.offsetParent === null || node.closest("[data-no-advance]")) continue;
@@ -224,6 +329,11 @@ async function inspectPreviewQualityInternal(job, { captureScreenshots }) {
   try {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
     await page.goto(`${previewUrl}?chapter=0`, { waitUntil: "networkidle", timeout: 60000 });
+    // 结构审计测"素颜版式"（2026-07-22 根治 job-30 假 0 分）：镜头推近/呼吸层
+    // 的变换本来就该越出视口，运动质量归 effectScore 管辖；这里中和相机变换后
+    // 再测量，否则走查节奏一旦踩中镜头生效窗口，溢出/碰撞全是误报（job-27 得
+    // 100 的真相是走查时镜头恰好未生效——本修复把同一口径变成确定性行为）。
+    await page.addStyleTag({ content: ".camera-layer,.camera-punch,.camera-breath{transform:none!important;animation:none!important;transition:none!important}" });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(350);
     const outDir = join(presDir, "public");
