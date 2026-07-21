@@ -60,11 +60,35 @@ test("时间戳不递增被判定为 error", () => {
   assert.match(result.findings[0].rule, /cue-time-order/);
 });
 
-test("空 step 只警告不阻断（兜底路径接管）", () => {
+test("空 step 只警告不阻断（无音频过场步，兜底路径接管）", () => {
   const presDir = makeRegistry({ hook: [[]] });
   const result = validateSubtitleCues(presDir);
   assert.equal(result.pass, true);
   assert.equal(result.warnings, 1);
+  assert.equal(result.findings[0].rule, "step-no-cues");
+});
+
+test("有音频却无 cue 判 error（静默退化成墙钟轮换=必然不同步）", () => {
+  const presDir = makeRegistry({ hook: [[]] });
+  mkdirSync(join(presDir, "public", "audio", "hook"), { recursive: true });
+  writeFileSync(join(presDir, "public", "audio", "hook", "1.mp3"), "fake");
+  const result = validateSubtitleCues(presDir);
+  assert.equal(result.pass, false);
+  assert.match(cueEvidence(result)[0], /step-silent-fallback/);
+});
+
+test("charMs 与文本逐字对齐——错位判 error，对齐通过", () => {
+  const ok = makeRegistry({
+    hook: [[{ text: "先看三件事", startMs: 40, charMs: [40, 260, 480, 700, 920] }]],
+  });
+  assert.equal(validateSubtitleCues(ok).pass, true);
+
+  const bad = makeRegistry({
+    hook: [[{ text: "先看三件事", startMs: 40, charMs: [40, 260] }]],
+  });
+  const result = validateSubtitleCues(bad);
+  assert.equal(result.pass, false);
+  assert.match(cueEvidence(result)[0], /cue-charms-misaligned/);
 });
 
 test("registry 缺失判定为 error", () => {

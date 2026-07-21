@@ -38,29 +38,34 @@ const TRAILING_STRIP = /[。．.，,、；;：:…\s]+$/;
 const segmenter = new Intl.Segmenter("zh", { granularity: "word" });
 
 function chunkWithTimestamps(atoms) {
+  // buf 以逐字 {ch, ms} 累积——除 cue 起点外还产出 charMs 逐字时间轴，
+  // 供 WordMark/useSpeechTrigger 做字级精度的效果触发（效果 v2b）。
   const chunks = [];
-  let buf = "";
-  let bufStartMs = null;
+  let buf = []; // [{ch, ms}]
+  const bufText = () => buf.map((c) => c.ch).join("");
 
   const flush = () => {
-    const out = buf.trim().replace(TRAILING_STRIP, "");
-    if (out) chunks.push({ text: out, startMs: bufStartMs ?? 0 });
-    buf = "";
-    bufStartMs = null;
+    const raw = bufText();
+    const lead = raw.length - raw.trimStart().length;
+    const out = raw.trim().replace(TRAILING_STRIP, "");
+    if (out) {
+      const kept = buf.slice(lead, lead + [...out].length);
+      chunks.push({ text: out, startMs: kept[0]?.ms ?? 0, charMs: kept.map((c) => c.ms) });
+    }
+    buf = [];
   };
 
-  for (const { text: atom, startMs } of atoms) {
+  for (const { text: atom, startMs, charMs } of atoms) {
     const isPunct = ANY_PUNCT.test(atom);
-    if (buf === "" && isPunct) continue; // cue 不以标点开头
+    if (buf.length === 0 && isPunct) continue; // cue 不以标点开头
     // 词完整：装不下整个词就先断句（标点不受此限，随后由 flush 剥离）
-    if (buf !== "" && !isPunct && buf.trim().length + atom.length > HARD_MAX_CHARS) {
+    if (buf.length !== 0 && !isPunct && bufText().trim().length + atom.length > HARD_MAX_CHARS) {
       flush();
     }
-    if (buf === "") bufStartMs = startMs;
-    buf += atom;
+    [...atom].forEach((ch, i) => buf.push({ ch, ms: charMs?.[i] ?? startMs }));
     if (HARD_BREAK.test(atom)) {
       flush(); // 气口必断
-    } else if (SOFT_BREAK.test(atom) && buf.trim().length >= TARGET_CHARS) {
+    } else if (SOFT_BREAK.test(atom) && bufText().trim().length >= TARGET_CHARS) {
       flush(); // 顿号：到目标长度才断
     }
   }
@@ -109,7 +114,12 @@ function cuesForWordsFile(path) {
   // Intl.Segmenter 词级归组：cue 边界只落在词边界，"高兴"永不拆分。
   const atoms = [];
   for (const seg of segmenter.segment(fullText)) {
-    atoms.push({ text: seg.segment, startMs: chars[seg.index]?.startMs ?? 0 });
+    const cps = [...seg.segment];
+    atoms.push({
+      text: seg.segment,
+      startMs: chars[seg.index]?.startMs ?? 0,
+      charMs: cps.map((_, k) => chars[seg.index + k]?.startMs ?? chars[seg.index]?.startMs ?? 0),
+    });
   }
   return chunkWithTimestamps(atoms);
 }
@@ -137,6 +147,8 @@ lines.push("");
 lines.push("export interface SubtitleCue {");
 lines.push("  text: string;");
 lines.push("  startMs: number;");
+lines.push("  /** 每个字的真实开口时刻（毫秒，与 text 逐字对齐）——词级效果触发的精度来源。 */");
+lines.push("  charMs?: number[];");
 lines.push("}");
 lines.push("");
 lines.push("// chapterId -> per-step array of cues (index = step, 0-based)");
