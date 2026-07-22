@@ -20,10 +20,18 @@ function chunkFallbackText(text: string) {
     if (value) chunks.push(value);
     current = "";
   };
-  for (const char of text.trim()) {
-    if (!current && /[，、；,;\s]/.test(char)) continue;
-    current += char;
-    if (/[。！？.!?…]/.test(char) || (/[，、；,;]/.test(char) && current.length >= 6) || current.length >= 10) flush();
+  // 词完整契约（与 gen-subtitle-cues.mjs 同源语义，2026-07-22 补齐）：按
+  // Intl.Segmenter 词打包，词绝不跨页（"作者"不拆成"…作/者"）；气口标点必断；
+  // 10 字硬上限在词边界回退——超限的下一个词整体挪到下一页。
+  const Segmenter = (Intl as { Segmenter?: new (locale: string, options: { granularity: string }) => { segment(input: string): Iterable<{ segment: string }> } }).Segmenter;
+  const segments: string[] = Segmenter
+    ? [...new Segmenter("zh", { granularity: "word" }).segment(text.trim())].map((s) => s.segment)
+    : [...text.trim()];
+  for (const seg of segments) {
+    if (!current && /^[，、；,;\s]+$/.test(seg)) continue;
+    if (current && current.length + seg.length > 10 && !/^[。！？.!?…，、；,;：:\s]+$/.test(seg)) flush();
+    current += seg;
+    if (/[。！？.!?…]$/.test(seg) || (/[，、；,;]$/.test(seg) && current.length >= 6)) flush();
   }
   flush();
   return chunks;
