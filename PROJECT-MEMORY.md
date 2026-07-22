@@ -1,5 +1,20 @@
 # VideoForge 项目记忆
 
+## 2026-07-23 凌晨：用户五点反馈批次（e3597b7）——job-36 全自动验收通过
+
+① **推拉节奏纪律**：zoom 类（focus/magnify）全局间隔 ≥3 步、过密降档 spotlight（magnify 优先
+  保留、宁降前面的 heading focus）。job-36 实测 13 处 zoom、最小间隔 3、分布 3-9 步，
+  spotlight/pan 穿插；② **边缘安全渐变**：模板 edge-fade 底部 150px + 数字人侧（reserve×0.72）
+  渐变到 --shell，镜头推拉滑到边缘的内容淡出不硬压字幕/数字人（z=3，scene 之上字幕之下）；
+  ③ **数字 hero 字号**：CHAPTER-CRAFT 规则（数字主角屏 ≥96px）+ 审计 typeScale 记账维
+  （largestFontPx/numericMaxFontPx，先校准后执法）——job-36 前排屏 104-172px 模型已遵守；
+  ④ **后处理分步进度**：chapter_gen 89-98% 五道工序逐一打点（构建/静态规则/镜头编排/逐屏
+  审计/效果打分），修复轮带轮次+预估时长——"卡 88%"根治；⑤ 规则住所不变（效果本体=代码、
+  纪律=CHAPTER-CRAFT、每作品镜头=registry 数据），新增规则一律进既有分层不另起炉灶。
+  **job-36（art-126 LLM 生态，11 章 74 步）验收：审计 100/100（1 轮修复收敛）、effectScore
+  94/100 过门禁、进度事件全链可见**；停 gate_chapters 待用户。edge-fade 在推拉实景下的
+  观感待用户看片拍板（可一键移除：删 App 两行 + base.css 一段）。
+
 ## 2026-07-22 深夜续：推拉感消失根治（用户实测抓出）+ 启动小工具 + 增量预览 UX
 
 **推拉感消失四层根因（21de1fb），job-34 重排实证强推近 7→32 处、实测渲染倍率 2.0**：
