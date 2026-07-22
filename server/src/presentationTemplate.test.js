@@ -82,7 +82,7 @@ test("narration extraction accepts minified chapter imports", async () => {
   // Resolve chapter files from the registry and filesystem rather than
   // depending on one particular import formatting.
   assert.match(extractor, /readdir\(CHAPTERS_DIR/);
-  assert.match(extractor, /narrationFile: join\(CHAPTERS_DIR, flat\)/);
+  assert.match(extractor, /return join\(CHAPTERS_DIR, flat\)/);
   assert.match(extractor, /\.narrations\.ts/);
 });
 

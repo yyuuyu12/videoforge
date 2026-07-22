@@ -26,6 +26,8 @@ const STATUS_TEXT: Record<JD["status"], string> = {
   waiting_approval: "等你确认",
   failed: "出错了",
   done: "已完成",
+  cancelling: "取消中",
+  cancelled: "已取消",
 };
 
 export function JobDetail({
