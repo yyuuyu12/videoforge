@@ -1,5 +1,6 @@
-import { type ReactNode } from "react";
+import { useEffect, type ReactNode } from "react";
 import { useSpeechTrigger } from "./useSpeechTrigger";
+import { reportSfx } from "./sfxReporter";
 import "./effects.css";
 
 interface Props {
@@ -18,6 +19,10 @@ interface Props {
  */
 export function Slam({ children, delay = 150, word }: Props) {
   const fired = useSpeechTrigger(word);
+  // 音效上报（P0-A）：砸入声踩在视觉入场那一拍（触发 + 入场延迟）
+  useEffect(() => {
+    if (fired) reportSfx("slam", delay);
+  }, [fired, delay]);
   return (
     <span
       className={`fx-slam${fired ? "" : " fx-slam--wait"}`}

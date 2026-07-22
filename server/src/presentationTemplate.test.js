@@ -58,7 +58,7 @@ test("quality audit traverses every presentation step and keeps the worst score"
 
 test("chapter generation uses structure-first quality gating before screenshot repair", async () => {
   const pipeline = await readFile(fileURLToPath(new URL("./workers/pipeline.js", import.meta.url)), "utf8");
-  assert.match(pipeline, /inspectPreviewQuality\(getJob\(jobId\)\)/);
+  assert.match(pipeline, /inspectPreviewQuality\(getJob\(jobId\)/);
   assert.match(pipeline, /if \(!audit\.pass\) audit = await auditPreviewQuality/);
   assert.match(pipeline, /!audit\.pass && attempt <= 3/);
   assert.match(pipeline, /repairChapterQuality\(getJob\(jobId\), audit\)/);

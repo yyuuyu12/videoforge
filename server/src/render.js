@@ -4,6 +4,8 @@ import { join, relative } from "node:path";
 import { chromium } from "playwright-core";
 import { logEvent } from "./db.js";
 import { preparePreview } from "./preview.js";
+import { config } from "./config.js";
+import { sfxFilterChains, sfxPlacements, sfxSummary } from "./sfxMix.js";
 
 /**
  * 服务端一键成片：无头 Chromium 以 ?auto=1 真实播放整片，
@@ -507,6 +509,9 @@ export async function renderJob(job) {
     // 拦截每个 <audio> 的真实播放时刻（playing = 声音真正开始，而不是 play() 调用）。
     await context.addInitScript(() => {
       window.__vfAudio = [];
+      // P0-A 音效层：预置采集数组后效果件（whip/Slam/Counter）会把触发时刻
+      // push 进来（Date.now，与音频事件同钟）；普通预览没有这个数组=零开销。
+      window.__vfSfx = [];
       const seen = new WeakSet();
       const origPlay = HTMLMediaElement.prototype.play;
       HTMLMediaElement.prototype.play = function (...args) {
@@ -586,6 +591,7 @@ export async function renderJob(job) {
 
     await cdp.send("Page.stopScreencast").catch(() => {});
     const audioEvents = await page.evaluate(() => window.__vfAudio);
+    const sfxEvents = await page.evaluate(() => window.__vfSfx || []).catch(() => []);
     const visualQuality = await inspectVisualQuality(page).catch(() => ({ score: null, collisions: null, subtitleSafe: null, sampledElements: 0 }));
     writeFileSync(join(tmpDir, "events.json"), JSON.stringify(audioEvents, null, 2));
     await browser.close();
@@ -641,8 +647,21 @@ export async function renderJob(job) {
       args.push("-i", p.file);
       chains.push(`[${i + 1}:a]adelay=${p.offsetMs}|${p.offsetMs}[a${i}]`);
     });
-    const mixInputs = placements.map((_, i) => `[a${i}]`).join("");
-    chains.push(`${mixInputs}amix=inputs=${placements.length}:normalize=0:duration=longest,apad[mix]`);
+    // P0-A 音效层：效果件真实触发时刻 → 低增益 SFX 摆入同一时间轴。
+    // 事件来自运行时上报（老作品组件未升级=空数组，自然跳过）。
+    let sfxNote = "";
+    let sfxLabels = [];
+    if (config.sfx?.enabled !== false && sfxEvents.length) {
+      const sfxPlaced = sfxPlacements(sfxEvents, t0 * 1000);
+      const sfx = sfxFilterChains(sfxPlaced, placements.length + 1);
+      args.push(...sfx.args);
+      chains.push(...sfx.chains);
+      sfxLabels = sfx.labels;
+      sfxNote = sfxSummary(sfxPlaced);
+      if (sfxLabels.length) logEvent(job.id, "render", `音效混入 ${sfxLabels.length} 处（${sfxNote}）`);
+    }
+    const mixInputs = placements.map((_, i) => `[a${i}]`).join("") + sfxLabels.join("");
+    chains.push(`${mixInputs}amix=inputs=${placements.length + sfxLabels.length}:normalize=0:duration=longest,apad[mix]`);
     const output = join(job.workspace, "output.mp4");
     const mux = await run("ffmpeg", [...args, "-filter_complex", chains.join(";"),
       // Presentation frames already contain the time-synchronized AvatarPresenter.

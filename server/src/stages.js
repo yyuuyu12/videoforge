@@ -13,6 +13,7 @@ import { validateSubtitleCues, cueEvidence } from "./subtitleCheck.js";
 import { readChapterStructure } from "./cameraChoreographer.js";
 import { recordQualityEntry, ledgerStats } from "./qualityLedger.js";
 import { health as heygemHealth, submitJob, taskStatus, downloadResult } from "./heygem.js";
+import { isCancelling, registerChild } from "./cancellation.js";
 
 /**
  * Pipeline definition. Each stage is either:
@@ -54,6 +55,7 @@ export function stageDef(stageId) {
 function sh(cmd, args, cwd, jobId, stage, envExtra = {}, onLine = null) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, shell: true, env: { ...process.env, ...envExtra } });
+    const unregisterChild = registerChild(jobId, child.pid); // 供一键取消杀 TTS/ffmpeg/字幕等子进程树
     let out = "";
     let settled = false;
     let lineBuf = "";
@@ -61,6 +63,7 @@ function sh(cmd, args, cwd, jobId, stage, envExtra = {}, onLine = null) {
     const finish = (result) => {
       if (settled) return;
       settled = true;
+      unregisterChild();
       resolve(result);
     };
     child.stdout.on("data", (d) => {
@@ -767,6 +770,8 @@ const runners = {
       const submitted = await submitJob({ audioB64: readFileSync(cmp3).toString("base64"), videoB64, videoFmt });
       let done = false;
       for (let i = 0; i < 360; i += 1) {
+        // 协作式取消：停我方轮询（远端 GPU 任务无 cancel 端点，会算完变孤儿，属预期）
+        if (isCancelling(job.id)) return { ok: false, note: "已被用户取消", cancelled: true };
         const state = await taskStatus(submitted.taskId);
         const progress = Number(state.progress ?? 0);
         avatarProgress(job.id, 18 + ((ci + progress / 100) / chunks.length) * 66, `分段推理 ${ci + 1}/${chunks.length} — 口型 ${Math.min(100, Math.round(progress))}%`);

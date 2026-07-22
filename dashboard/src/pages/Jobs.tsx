@@ -7,6 +7,8 @@ const STATUS_LABEL: Record<Job["status"], string> = {
   waiting_approval: "待审批",
   failed: "失败",
   done: "完成",
+  cancelling: "取消中",
+  cancelled: "已取消",
 };
 
 export function Jobs({

@@ -16,7 +16,7 @@ npm run server / npm run dashboard          # 开发：API :5401 + Vite :5400
 - `server/src/routes.js` — HTTP API 与本地文件服务
 - `server/src/workers/pipeline.js` — 流水线调度与重启恢复；`workers/extractions.js` — 抖音提取任务
 - `server/src/stages.js` — 文案/画面/音频/字幕/数字人/导出各阶段实现
-- `server/src/render.js` — 服务端一键成片：无头 Chromium（playwright-core + 系统 Chrome/Edge）实播采帧 + ffmpeg 按真实时间轴混音，产出 `workspaces/job-N/output.mp4`
+- `server/src/render.js` — 服务端一键成片：无头 Chromium（playwright-core + 系统 Chrome/Edge）实播采帧 + ffmpeg 按真实时间轴混音，产出 `workspaces/job-N/output.mp4`；`sfxMix.js` — P0-A 音效层（多助理路线首件）：效果件实播上报触发时刻（`window.__vfSfx`，渲染器预置才记录）→ 低增益 SFX 混入配音轨；资产 `server/assets/sfx/`（ffmpeg 合成保底，同名 wav 覆盖即换音色；`scripts/gen-sfx.mjs` 再生成），`config.sfx.enabled` 总开关
 - `server/src/agentRunner.js` — 生成引擎三路径：订阅模式走 Claude Agent SDK（主）→ `claude -p`（兜底）；API 模式走 OpenAI 兼容工具循环
 - `server/src/douyin.js` — TikHub、原声选择、Whisper、完整性校验
 - `server/src/devServers.js` — 按作品分配 :5300-5399 预览端口

@@ -1,5 +1,18 @@
 # VideoForge 项目记忆
 
+## 2026-07-22 深夜：P0-A 音效层落地（多助理路线首件）
+
+- 机制：效果件（whip/Slam/Counter）在真实播放时把触发时刻 push 进 `window.__vfSfx`
+  （渲染器 addInitScript 预置数组才记录，普通预览零开销；Date.now 与音频 playing 事件
+  同钟）→ render 混音时经 `sfxMix.js` 换算到视频时间轴、按类型低增益（0.28-0.55）叠进
+  配音轨。**零源码解析**（形状假设缺陷四次实证后的架构自觉）：效果没真播出来就没有声音。
+- 纪律件：全局 150ms 最小间隔去重（Slam 包 Counter 同词相差 ~100ms 会糊）、200 处上限
+  防刷屏、`config.sfx.enabled` 总开关、账目行"音效混入 N 处（whip×a slam×b counter×c）"。
+- 资产：`scripts/gen-sfx.mjs` 用 ffmpeg 合成三个保底音效进 `server/assets/sfx/`（零版权），
+  混音端只认文件名——**想换更好的音色直接同名覆盖 wav 即可**。
+- 验证：sfxMix 纯函数 5 项测试 + 与 render 完全同构的 ffmpeg 干跑（3 SFX+人声混流成功）；
+  **听感验收待首个带新组件的作品成片**（老作品组件未升级=空事件自然跳过，成片不受影响）。
+
 ## 2026-07-22 深夜批次：job-32 同质化考卷——工作台四盲区根治（用户抓出"每页长得差不多"）
 
 用户自建 job-32（抖音推流机制，13 章 66 屏）过了全部门禁停 gate_chapters，但人眼一看：

@@ -5,6 +5,7 @@ import { extname, join, relative, resolve } from "node:path";
 import { config, ROOT } from "./config.js";
 import { logEvent, recordUsage } from "./db.js";
 import { loadSettings } from "./settings.js";
+import { CancelledError, isCancelling, registerAbort, registerChild } from "./cancellation.js";
 
 let running = 0;
 const queue = [];
@@ -88,6 +89,8 @@ export function runAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usa
   }
   return new Promise((resolve) => {
     const task = async () => {
+      // 排队期间被取消的作业不再启动 agent（否则取消后它仍会跑起来）。
+      if (isCancelling(jobId)) { resolve({ ok: false, output: "", note: "已被用户取消", cancelled: true }); return; }
       running++;
       try {
         resolve(await runSubscriptionAgent({ jobId, stage, cwd, prompt, onProgress, usageOperation }));
@@ -129,6 +132,7 @@ async function runSdkAgent(sdk, ctx) {
   logEvent(jobId, stage, `agent start (sdk, cwd=${cwd})`);
   reportProgress(jobId, stage, onProgress, 22, "模型已启动，正在分析任务");
   const controller = new AbortController();
+  const unregisterAbort = registerAbort(jobId, controller); // 供一键取消中止在飞 SDK 会话
   const timer = setTimeout(() => controller.abort(), config.agent.timeoutMs);
   const started = Date.now();
   const cap = (s) => (s.length > 20000 ? s.slice(-20000) : s);
@@ -187,18 +191,21 @@ async function runSdkAgent(sdk, ctx) {
     );
     return { ok, output: out };
   } catch (error) {
-    const timedOut = controller.signal.aborted;
-    if (!sawMessage && !timedOut) {
+    const cancelled = isCancelling(jobId);
+    const timedOut = controller.signal.aborted && !cancelled;
+    if (!sawMessage && !timedOut && !cancelled) {
       // SDK 一条消息都没吐就挂了（如捆绑二进制缺失）——回退 CLI 路径。
       logEvent(jobId, stage, `SDK 启动失败（${error.message}），回退 claude -p`, "error");
       return runCliAgent(ctx);
     }
-    const note = timedOut ? `agent 超时（${Math.round(config.agent.timeoutMs / 60000)} 分钟上限）` : error.message;
-    recordUsage({ service: "llm", operation: usageOperation || `agent:${stage}`, jobId, status: "failed", durationMs: Date.now() - started, detail: `subscription/agent-sdk: ${note}` });
-    logEvent(jobId, stage, `agent failed (sdk): ${note}\n--- tail ---\n${out.slice(-1500)}`, "error");
-    return { ok: false, output: out, note };
+    // 取消触发的 abort 必须与超时区分，否则会被误报为"超时"污染归因。
+    const note = cancelled ? "已被用户取消" : timedOut ? `agent 超时（${Math.round(config.agent.timeoutMs / 60000)} 分钟上限）` : error.message;
+    recordUsage({ service: "llm", operation: usageOperation || `agent:${stage}`, jobId, status: cancelled ? "cancelled" : "failed", durationMs: Date.now() - started, detail: `subscription/agent-sdk: ${note}` });
+    logEvent(jobId, stage, `agent ${cancelled ? "cancelled" : "failed"} (sdk): ${note}\n--- tail ---\n${out.slice(-1500)}`, cancelled ? "warning" : "error");
+    return { ok: false, output: out, note, cancelled };
   } finally {
     clearTimeout(timer);
+    unregisterAbort();
   }
 }
 
@@ -217,6 +224,7 @@ function runCliAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOp
     });
 
     liveChildren.add(child.pid);
+    const unregisterChild = registerChild(jobId, child.pid); // 供一键取消定向杀 claude -p 进程树
     let out = "";
     let err = "";
     const cap = (s) => (s.length > 20000 ? s.slice(-20000) : s);
@@ -244,6 +252,7 @@ function runCliAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOp
       clearTimeout(timer);
       clearInterval(progressTimer);
       liveChildren.delete(child.pid);
+      unregisterChild();
       const ok = code === 0;
       reportProgress(jobId, stage, onProgress, ok ? 88 : 100, ok ? "模型任务完成，正在整理结果" : "模型执行失败，正在整理错误信息");
       recordUsage({
@@ -338,6 +347,8 @@ export function parseChatCompletion(responseText, contentType = "") {
 async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, usageOperation, imagePaths = [] }) {
   const { llm } = loadSettings();
   logEvent(jobId, stage, `API agent start (${llm.provider}/${llm.model})`);
+  const jobAc = new AbortController(); // 供一键取消中止在飞的 chat/completions 请求
+  const unregisterAbort = registerAbort(jobId, jobAc);
   try {
     const userContent = imagePaths.length
       ? [
@@ -359,6 +370,7 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
     // 上限按最大作品规模留余量：5 章作品实测 ~40+ 轮（每章 read/write/tsc
     // 多轮），40 的旧上限在第 5 章末尾撞线（job#13 实测）。
     for (let turn = 0; turn < 100; turn++) {
+      if (isCancelling(jobId)) throw new CancelledError(); // 协作式取消：每轮开头检查
       const started = Date.now();
       let response;
       let responseText = "";
@@ -371,7 +383,7 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
             method: "POST",
             headers: { authorization: `Bearer ${llm.apiKey}`, "content-type": "application/json" },
             body: JSON.stringify({ model: llm.model, messages, tools: API_TOOLS, tool_choice: "auto", max_tokens: 8192, stream: false }),
-            signal: AbortSignal.timeout(180000),
+            signal: AbortSignal.any([AbortSignal.timeout(180000), jobAc.signal]),
           });
           responseText = await response.text();
           if (response.status < 500 || attempt === 2) break;
@@ -423,12 +435,13 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
         logEvent(jobId, stage, `API agent done\n--- tail ---\n${finalText.slice(-1500)}`);
         return { ok: true, output: finalText };
       }
+      if (isCancelling(jobId)) throw new CancelledError(); // 工具调用前再检查一次
       const toolNames = calls.map((call) => call.function.name).join("、");
       reportProgress(jobId, stage, onProgress, Math.min(78, 30 + turn * 4), `正在执行：${toolNames}`);
       for (const call of calls) {
         let result;
         try {
-          result = await executeApiTool(cwd, call.function.name, JSON.parse(call.function.arguments || "{}"));
+          result = await executeApiTool(cwd, call.function.name, JSON.parse(call.function.arguments || "{}"), jobId);
         } catch (error) {
           result = `ERROR: ${error.message}`;
         }
@@ -437,12 +450,18 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
     }
     throw new Error("API agent 超过最大工具调用轮数");
   } catch (error) {
+    if (error?.cancelled || isCancelling(jobId)) {
+      logEvent(jobId, stage, "API agent 已被用户取消", "warning");
+      return { ok: false, output: "", note: "已被用户取消", cancelled: true };
+    }
     logEvent(jobId, stage, `API agent failed: ${error.message}`, "error");
     return { ok: false, output: "", note: error.message };
+  } finally {
+    unregisterAbort();
   }
 }
 
-export async function executeApiTool(cwd, name, args) {
+export async function executeApiTool(cwd, name, args, jobId) {
   const { readFile, writeFile, readdir, mkdir } = await import("node:fs/promises");
   const { resolve, dirname, relative } = await import("node:path");
   const workspaceRoot = resolve(cwd);
@@ -477,19 +496,21 @@ export async function executeApiTool(cwd, name, args) {
     const entries = await readdir(readPath(args.path), { withFileTypes: true });
     return entries.map((entry) => `${entry.isDirectory() ? "[dir]" : "[file]"} ${entry.name}`).join("\n");
   }
-  if (name === "run_command") return runWorkspaceCommand(args.command, cwd);
+  if (name === "run_command") return runWorkspaceCommand(args.command, cwd, jobId);
   throw new Error(`未知工具 ${name}`);
 }
 
-function runWorkspaceCommand(command, cwd) {
+function runWorkspaceCommand(command, cwd, jobId) {
   return new Promise((resolve) => {
     const child = spawn(command, { cwd, shell: true, env: process.env });
+    const unregisterChild = registerChild(jobId, child.pid); // 供一键取消杀 tsc/vite 等工具子进程
     let output = "";
     const append = (data) => { output = (output + data).slice(-20000); };
     child.stdout.on("data", append);
     child.stderr.on("data", append);
     const timer = setTimeout(() => killTree(child.pid), 10 * 60 * 1000);
-    child.on("close", (code) => { clearTimeout(timer); resolve(`exit ${code}\n${output}`); });
+    child.on("close", (code) => { clearTimeout(timer); unregisterChild(); resolve(`exit ${code}\n${output}`); });
+    child.on("error", () => { clearTimeout(timer); unregisterChild(); resolve(`exit -1\n${output}`); });
   });
 }
 

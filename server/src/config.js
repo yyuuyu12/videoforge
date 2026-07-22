@@ -87,6 +87,9 @@ const DEFAULTS = {
   // 时触发一次效果向修复、修复后仍不达标判阶段失败。2026-07-22 开门禁：
   // job-32 全片零镜头零效果件打 63 分被记账模式放行到用户面前，是开门的实证。
   effectScore: { enabled: true, gate: true, minScore: 72 },
+  // P0-A 音效层（多助理路线首件）：成片混音时把效果件真实触发时刻叠 SFX。
+  // 音量在 sfxMix.js 的 SFX_LIBRARY 按类型定；false 一键关掉整层。
+  sfx: { enabled: true },
 };
 
 function deepMerge(base, extra) {

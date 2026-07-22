@@ -29,7 +29,7 @@ export interface Job {
   title: string | null;
   workspace: string;
   stage: string;
-  status: "queued" | "running" | "waiting_approval" | "failed" | "done";
+  status: "queued" | "running" | "waiting_approval" | "failed" | "done" | "cancelling" | "cancelled";
   created_at: string;
   updated_at: string;
   excerpt?: string | null;
@@ -68,6 +68,18 @@ export interface ChapterReview {
   status: "queued" | "generating" | "review" | "approved";
 }
 
+export interface QualityProgress {
+  phase: "lint" | "camera" | "audit" | "repair" | "effect" | "done";
+  round: number;
+  maxRound: number;
+  chapter: number | null;
+  step: number | null;
+  checkedSteps: number | null;
+  score: number | null;
+  targetScore: number | null;
+  etaSeconds: number | null;
+}
+
 export interface ChapterGeneration {
   service: string;
   expected: number;
@@ -77,6 +89,7 @@ export interface ChapterGeneration {
   approved: number;
   percent: number;
   current: { current: number; total: number; chapter: string; status: string; message: string } | null;
+  quality?: QualityProgress | null;
   message: string;
   chapters: ChapterReview[];
 }
@@ -360,6 +373,7 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ stage }),
     }),
+  cancel: (id: number) => req(`/jobs/${id}/cancel`, { method: "POST" }),
   startRender: (id: number) =>
     req<{ ok: boolean; started: boolean }>(`/jobs/${id}/render`, {
       method: "POST",

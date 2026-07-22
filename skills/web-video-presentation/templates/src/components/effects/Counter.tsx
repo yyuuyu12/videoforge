@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useSpeechTrigger } from "./useSpeechTrigger";
+import { reportSfx } from "./sfxReporter";
 import "./effects.css";
 
 interface Props {
@@ -34,6 +35,7 @@ export function Counter({ to, from = 0, duration = 1200, decimals = 0, prefix = 
     setSettled(false);
     setValue(from);
     if (!fired) return; // 等口播念到触发词（无 word 时 fired 立即为 true）
+    reportSfx("counter", delay); // 音效上报（P0-A）：滚动铺底声与数字起跑同拍
     let start = 0;
     const run = (now: number) => {
       if (!start) start = now;

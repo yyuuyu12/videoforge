@@ -1,5 +1,6 @@
 import { useEffect, useRef, type ReactNode } from "react";
 import { CAMERA_CUES, type CameraCue } from "../registry/cameraCues";
+import { reportSfx } from "./effects/sfxReporter";
 import "./CameraLayer.css";
 
 interface Props {
@@ -56,6 +57,7 @@ export function CameraLayer({ chapterId, step, children }: Props) {
         ],
         { duration: 190, easing: "cubic-bezier(0.2, 0.85, 0.3, 1)" },
       );
+      reportSfx("whip");
     }
 
     const reset = () => {

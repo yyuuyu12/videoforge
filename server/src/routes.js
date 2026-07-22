@@ -4,7 +4,7 @@ import { basename, isAbsolute, join, relative, resolve } from "node:path";
 import { config, DATA_ROOT, ROOT } from "./config.js";
 import { db, getJob, logEvent, updateJob } from "./db.js";
 import { fetchArticleText, runDiscovery } from "./workers/discovery.js";
-import { approveGate, retryJob } from "./workers/pipeline.js";
+import { approveGate, cancelJob, retryJob } from "./workers/pipeline.js";
 import { runFeedback, STAGES } from "./stages.js";
 import { buildPresentation, previewStatus, startPreview, stopPreview } from "./preview.js";
 import { decodeUtf8OrGb18030 } from "./textEncoding.js";
@@ -89,6 +89,32 @@ api.get("/version", async (_req, res) => {
     });
   }
 });
+
+// 质量修复阶段 ETA（上界估算，宁高不误导）：审计阶段按剩余屏数×每屏节奏；
+// 修复/效果阶段按"当前轮剩余 + 剩余轮数 ×（历史平均每轮 + 一次复审）"。
+const QUALITY_PER_SCREEN_MS = 500;   // 逐屏审计节奏：350ms settle + 120ms 翻屏 + 开销
+const QUALITY_DEFAULT_ROUND_MS = 90000; // 本作品尚无历史修复耗时时的兜底
+function computeQualityEta(job, qp) {
+  if (!qp || qp.phase === "done") return null;
+  const now = Date.now();
+  const elapsedRound = qp.roundStartedAt ? Math.max(0, now - Date.parse(qp.roundStartedAt)) : 0;
+  const denom = Number(qp.checkedSteps) || 20;
+  if (qp.phase === "audit") {
+    return Math.round(Math.max(0, denom - (Number(qp.step) || 0)) * QUALITY_PER_SCREEN_MS / 1000);
+  }
+  let avgRoundMs = QUALITY_DEFAULT_ROUND_MS;
+  try {
+    const row = db.prepare(
+      "SELECT AVG(duration_ms) AS ms FROM usage_events WHERE job_id = ? AND operation IN ('visual-quality-repair','deterministic-repair') AND status = 'success' AND duration_ms > 0",
+    ).get(job.id);
+    if (row?.ms) avgRoundMs = row.ms;
+  } catch {}
+  const auditPassMs = denom * QUALITY_PER_SCREEN_MS;
+  const roundCostMs = avgRoundMs + auditPassMs;
+  const currentRoundRemaining = Math.max(0, roundCostMs - elapsedRound);
+  const futureRounds = Math.max(0, (Number(qp.maxRound) || 1) - (Number(qp.round) || 0)) * roundCostMs;
+  return Math.round((currentRoundRemaining + futureRounds) / 1000);
+}
 
 function chapterGeneration(job) {
   const presentationRoot = join(job.workspace, "presentation");
@@ -184,6 +210,27 @@ function chapterGeneration(job) {
       else if (liveProgress.status !== "done") chapter.status = "queued";
     });
   }
+  // 质量修复循环实时态（chapter_gen 全部章节生成后进入）：读 pipeline 写的
+  // sidecar，附带 ETA 下发给前端质量进度面板。仅在 chapter_gen 运行中展示。
+  let quality = null;
+  if (job.stage === "chapter_gen") {
+    try {
+      const qp = JSON.parse(readFileSync(join(job.workspace, "presentation", ".videoforge-quality-progress.json"), "utf8"));
+      if (qp && qp.phase && qp.phase !== "done") {
+        quality = {
+          phase: qp.phase,
+          round: Number(qp.round) || 0,
+          maxRound: Number(qp.maxRound) || 0,
+          chapter: qp.chapter ?? null,
+          step: qp.step ?? null,
+          checkedSteps: qp.checkedSteps ?? null,
+          score: qp.score ?? null,
+          targetScore: qp.targetScore ?? null,
+          etaSeconds: computeQualityEta(job, qp),
+        };
+      }
+    } catch {}
+  }
   return {
     service,
     expected: total,
@@ -193,6 +240,7 @@ function chapterGeneration(job) {
     approved,
     percent,
     current: liveProgress,
+    quality,
     message: liveMessage || (job.stage === "chapter_gen"
       ? `正在生成并校验章节，已完成 ${ready}/${total || "?"}`
       : job.stage === "gate_chapters"
@@ -672,7 +720,7 @@ api.get("/jobs", (_req, res) => {
 api.delete("/jobs/:id", (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "作品不存在或已经删除" });
-  if (["queued", "running"].includes(job.status)) {
+  if (["queued", "running", "cancelling"].includes(job.status)) {
     return res.status(409).json({ error: "作品正在生成，完成或失败后才能删除" });
   }
 
@@ -1056,6 +1104,15 @@ api.post("/jobs/:id/chapters/approve-all", (req, res) => {
 
 api.post("/jobs/:id/retry", (req, res) => {
   res.json({ ok: retryJob(Number(req.params.id), req.body?.stage) });
+});
+
+// 一键取消正在运行的作业：协作式停在当前阶段 + 立即中止在飞的 agent/TTS 子进程。
+api.post("/jobs/:id/cancel", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "作品不存在" });
+  const r = cancelJob(job.id);
+  if (!r.ok) return res.status(409).json({ error: r.reason === "not_running" ? "作品未在运行中，无需取消" : "无法取消" });
+  res.json({ ok: true });
 });
 
 api.get("/jobs/:id/feedback/:feedbackId/attachment", (req, res) => {

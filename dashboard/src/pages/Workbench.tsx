@@ -110,6 +110,22 @@ function friendlyProgressText(text: string) {
   return text.trim() || "正在处理当前任务";
 }
 
+const qualityPhaseLabels: Record<string, string> = {
+  lint: "静态规则校验",
+  camera: "镜头声明校验",
+  audit: "逐屏结构审计",
+  repair: "画面修复",
+  effect: "博主质感评分",
+};
+function qualityPhaseLabel(phase: string) {
+  return qualityPhaseLabels[phase] || "画面质量校验";
+}
+function formatEta(seconds: number | null) {
+  if (!seconds || seconds <= 0) return "";
+  if (seconds >= 60) return `预计还需约 ${Math.round(seconds / 60)} 分钟`;
+  return "预计还需不到 1 分钟";
+}
+
 type RetryImpact = {
   label: string;
   redo: string;
@@ -450,6 +466,18 @@ export function Workbench({
       await load();
     } catch (error) {
       setRegenerateState(`重试提交失败：${error instanceof Error ? error.message : "未知错误"}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+  const cancelGeneration = async () => {
+    if (busy) return;
+    setBusy(true);
+    try {
+      await api.cancel(job.id);
+      await load();
+    } catch (error) {
+      setRegenerateState(`取消失败：${error instanceof Error ? error.message : "未知错误"}`);
     } finally {
       setBusy(false);
     }
@@ -925,6 +953,22 @@ export function Workbench({
                 已完成并检查通过的章节会自动加入预览；正在生成的章节完成后也会继续更新。
               </p>
             )}
+            {chapterGenerationRunning && chapterGeneration.quality && chapterGeneration.quality.phase !== "done" && (() => {
+              const q = chapterGeneration.quality;
+              const segs = [
+                `${qualityPhaseLabel(q.phase)}${q.maxRound > 1 && q.round > 0 ? ` · 第 ${q.round}/${q.maxRound} 轮` : ""}`,
+                q.chapter != null
+                  ? `${q.phase === "repair" ? "正在修复" : "正在校验"}第 ${q.chapter} 章第 ${q.step} 屏${q.checkedSteps ? `（共 ${q.checkedSteps} 屏）` : ""}`
+                  : "",
+                q.score != null && q.targetScore != null ? `当前 ${q.score}/100，目标 ${q.targetScore}` : "",
+                formatEta(q.etaSeconds),
+              ].filter(Boolean);
+              return (
+                <p className="vf-generation-explainer vf-quality-progress" role="status" aria-live="polite">
+                  {segs.join(" · ")}
+                </p>
+              );
+            })()}
             {chapterGeneration.chapters.length > 0 && (
               <div className="vf-chapter-review-list">
                 {chapterGeneration.chapters.map((chapter) => {
@@ -1378,6 +1422,10 @@ export function Workbench({
                 ? "需要处理"
                 : job.status === "waiting_approval"
                   ? "等你确认"
+                  : job.status === "cancelled"
+                    ? "已取消"
+                    : job.status === "cancelling"
+                      ? "取消中"
                 : "制作中"}
         </em>
       </header>
@@ -1420,6 +1468,31 @@ export function Workbench({
             </span>
           </div>
           <em>{job.status === "queued" ? "等待开始" : "进行中"}</em>
+          <button type="button" onClick={() => void cancelGeneration()} disabled={busy}>
+            {busy ? "正在取消..." : "取消生成"}
+          </button>
+        </div>
+      )}
+      {job.status === "cancelling" && (
+        <div className="vf-long-progress" role="status">
+          <i />
+          <div>
+            <b>正在取消…</b>
+            <span>正在停止当前阶段并中止在飞任务，稍候会停在当前环节。</span>
+          </div>
+          <em>取消中</em>
+        </div>
+      )}
+      {job.status === "cancelled" && (
+        <div className="vf-failed-banner" role="status">
+          <div className="vf-failed-banner-copy">
+            <strong>已取消，已完成的内容都已保留</strong>
+            <span>{job.error || "生成已被用户取消"}</span>
+            <small>停在环节：{failedRetryImpact.label}</small>
+          </div>
+          <button type="button" onClick={() => void retryFailedStage()} disabled={busy}>
+            {busy ? "正在继续..." : `从“${failedRetryImpact.label}”继续`}
+          </button>
         </div>
       )}
       {job.status === "failed" && (
