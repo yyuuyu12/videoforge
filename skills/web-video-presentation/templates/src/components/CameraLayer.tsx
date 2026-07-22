@@ -88,7 +88,16 @@ export function CameraLayer({ chapterId, step, children }: Props) {
       void layer.offsetWidth; // 强制回流，让测量基于复位后的布局
       const layerRect = layer.getBoundingClientRect();
       const scale0 = layerRect.width / layer.offsetWidth || 1;
-      const t = el.getBoundingClientRect();
+      // 墨迹矩形（2026-07-22 job-34 推拉感消失根治）：块级标题 rect 宽=容器宽，
+      // 短标题也被当成"宽目标"把倍率钳到 1.1——推近要保护的是**文字墨迹**不被
+      // 切，不是块盒子。Range 取内容实际边界；异常（空内容/异形节点）退回元素盒。
+      let t = el.getBoundingClientRect();
+      try {
+        const range = document.createRange();
+        range.selectNodeContents(el);
+        const ink = range.getBoundingClientRect();
+        if (ink.width >= 8 && ink.height >= 8 && ink.width <= t.width + 1 && ink.height <= t.height + 1) t = ink;
+      } catch { /* 保持元素盒 */ }
       const cx = (t.left + t.width / 2 - layerRect.left) / scale0;
       const cy = (t.top + t.height / 2 - layerRect.top) / scale0;
       const W = layer.offsetWidth;

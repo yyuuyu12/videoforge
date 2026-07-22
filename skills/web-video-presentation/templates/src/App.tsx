@@ -32,6 +32,17 @@ function estimateMs(text: string): number {
   return Math.max(1800, text.length * 250 + 400);
 }
 
+// 章节结构真相源（2026-07-22）：registry 源码写法六种形状实证不可靠解析——
+// 工作台的确定性工具（镜头编排器/修复靶向）一律读这个运行时全局，
+// 与页面实际渲染的结构永远一致，源码怎么写都无所谓。
+if (typeof window !== "undefined") {
+  (window as unknown as { __VF_STRUCTURE?: unknown }).__VF_STRUCTURE = CHAPTERS.map((c) => ({
+    id: c.id,
+    title: c.title,
+    steps: c.narrations.length,
+  }));
+}
+
 export default function App() {
   const { mode, cycleMode, autoStarted, setAutoStarted } = useAutoMode();
   // Auto 模式未启动时抑制 stepper 的 Space 监听：否则启动播放的同一次按键

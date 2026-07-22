@@ -67,7 +67,16 @@ function extractSignalsInPage() {
     ? (camLayer.getBoundingClientRect().width / camLayer.offsetWidth || 1)
     : 1;
   const sig = (el, extra = {}) => {
-    const r = el.getBoundingClientRect();
+    // 墨迹矩形（2026-07-22 job-34 推拉感消失根治）：块级标题 rect 宽=容器宽，
+    // 短标题被误判"太宽推不动"→ 可行倍率预检整片降级 spotlight。推近保护
+    // 的是文字墨迹不被切，不是块盒子；与 CameraLayer 守卫同口径。
+    let r = el.getBoundingClientRect();
+    try {
+      const range = document.createRange();
+      range.selectNodeContents(el);
+      const ink = range.getBoundingClientRect();
+      if (ink.width >= 8 && ink.height >= 8 && ink.width <= r.width + 1 && ink.height <= r.height + 1) r = ink;
+    } catch { /* 保持元素盒 */ }
     return { path: pathOf(el), w: Math.round(r.width / layerScale), h: Math.round(r.height / layerScale), ...extra };
   };
 
@@ -95,16 +104,30 @@ function extractSignalsInPage() {
     if (!list || score > list.score) list = sig(el, { score });
   }
 
-  // 信号三：主内容块（h1 的最近块容器，pan 呼吸目标）
-  // 信号四：主标题 h1 本身（强 focus 目标——没大数字时的特写担当）
+  // 信号三：主内容块（主标题的最近块容器，pan 呼吸目标）
+  // 信号四：主标题（强 focus 目标——没大数字时的特写担当）。
+  // 2026-07-22 泛化（job-34 实证 10/20 章零缩放）：只认 h1 时，用 h2/大字 div
+  // 当标题的章整章找不到可推目标——改为"最大号可见文字块"（≥44px 任意标签，
+  // h1/h2/h3 降到 40px 门槛），谁字最大谁就是这屏的主角。
   let copy = null;
   let heading = null;
-  const h1 = [...root.querySelectorAll("h1")].find(visible);
-  if (h1) {
-    const container = h1.closest("div, main, section") || h1;
-    copy = sig(container === root ? h1 : container);
-    const hr = h1.getBoundingClientRect();
-    if (hr.width >= 40 && hr.height >= 30) heading = sig(h1);
+  let best = null;
+  for (const el of root.querySelectorAll("h1, h2, h3, div, p, span, strong")) {
+    if (!visible(el) || el.children.length > 2) continue;
+    const text = (el.textContent || "").trim();
+    if (text.length < 2 || text.length > 40) continue;
+    const fontSize = parseFloat(getComputedStyle(el).fontSize) || 0;
+    const floor = /^H[1-3]$/.test(el.tagName) ? 40 : 44;
+    if (fontSize < floor) continue;
+    // >=：字号继承让外层容器与真标题平局，文档序容器在前——平局取更深层
+    // 元素（后遍历到），否则选中全宽包裹层、墨迹=整行导致可行倍率归零
+    if (!best || fontSize >= best.fontSize) best = { el, fontSize };
+  }
+  if (best) {
+    const container = best.el.closest("div, main, section") || best.el;
+    copy = sig(container === root ? best.el : container);
+    const hr = best.el.getBoundingClientRect();
+    if (hr.width >= 40 && hr.height >= 30) heading = sig(best.el);
   }
 
   return {
@@ -130,10 +153,16 @@ export function readChapterStructure(presDir) {
   const chaptersDir = join(presDir, "src/chapters");
   // 形状①②：数组字面量里的 id 字段（此时 id 即目录/文件名约定）
   let entries = [...chaptersTs.matchAll(/id:\s*["']([^"']+)["']/g)].map((m) => ({ id: m[1], dir: m[1] }));
-  // 形状④：registry 无 id 字面量 → 按 import 路径顺序读模块导出的 id
+  // 形状④⑤⑥：registry 无 id 字面量（id re-export / def() 工厂 / 双 import）
+  // → 按 import 路径顺序读模块导出的 id；同目录多条 import（组件+narrations
+  // 分开导入）必须去重，否则章节数翻倍（job-34 实证 20 章读成 40）。
+  // ⚠️ 不要再往这里加新形状正则——新作品的真相源是运行时 window.__VF_STRUCTURE
+  //（choreographCameras 优先读页面），静态解析只为没有该全局的旧作品兜底。
   if (!entries.length) {
-    const dirs = [...chaptersTs.matchAll(/from\s*["']\.{1,2}\/chapters\/([^"']+)["']/g)]
-      .map((m) => m[1].replace(/\/(index)?(\.tsx?)?$/, "").split("/")[0]);
+    const dirs = [...new Set(
+      [...chaptersTs.matchAll(/from\s*["']\.{1,2}\/chapters\/([^"']+)["']/g)]
+        .map((m) => m[1].replace(/\/(index)?(\.tsx?)?$/, "").split("/")[0]),
+    )];
     entries = dirs.map((dir) => {
       let id = dir;
       const moduleFiles = [
@@ -179,11 +208,15 @@ function readExistingCues(presDir) {
  * @param options { density, avatarEnabled }
  */
 export async function choreographCameras(presDir, previewUrl, { density = "dense", avatarEnabled = true } = {}) {
-  const { order, steps } = readStructure(presDir);
-  // 0 章 = 结构读取失败，必须大声失败（job-32 实证：静默空转 → 全片零镜头，
-  // 只有 effectScore 记账里能看出来）。新形状出现时这里的报错就是修复线索。
-  if (!order.length || steps.every((n) => n === 0)) {
-    throw new Error("章节结构读取失败（registry/chapters.ts 形状不识别或 narrations 缺失）——拒绝 0 章空转，需检查 readChapterStructure 的形状兼容");
+  // 结构优先级：运行时 window.__VF_STRUCTURE（新模板 App 暴露，与实际渲染
+  // 永远一致）> 静态解析兜底（旧作品）。六种 registry 形状实证后停止源码猜测。
+  let order;
+  let steps;
+  try {
+    ({ order, steps } = readStructure(presDir));
+  } catch {
+    order = [];
+    steps = [];
   }
   // AI 意图快照（2026-07-22 根治重排破坏性幂等）：编排器输出会覆写 registry，
   // 直接回读会把自己上一轮的机器 cue 当"AI 声明"逐轮固化（job-31 实证：
@@ -213,6 +246,17 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
     await page.addStyleTag({ content: ".camera-layer,.camera-punch,.camera-breath{transform:none!important;animation:none!important;transition:none!important}" });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(400);
+    // 运行时结构真相源：页面实际渲染的章节/步数（新模板 App 暴露），
+    // 覆盖静态解析结果——源码形状再花也影响不到这里。
+    const runtime = await page.evaluate(() => window.__VF_STRUCTURE || null).catch(() => null);
+    if (Array.isArray(runtime) && runtime.length && runtime.every((r) => r && typeof r.id === "string" && Number.isFinite(r.steps))) {
+      order = runtime.map((r) => r.id);
+      steps = runtime.map((r) => r.steps);
+    }
+    // 0 章 = 两条路都读不到，必须大声失败（job-32 实证：静默空转 → 全片零镜头）
+    if (!order.length || steps.every((n) => n === 0)) {
+      throw new Error("章节结构读取失败（运行时 __VF_STRUCTURE 缺失且静态解析不识别）——拒绝 0 章空转");
+    }
     for (let ci = 0; ci < order.length; ci++) {
       signals.push(new Array(steps[ci]).fill(null));
       aiTargetRects.push(new Array(steps[ci]).fill(null));
@@ -235,10 +279,16 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
           let el = null;
           try { el = document.querySelector(sel); } catch {}
           if (!el) return null;
-          // 舞台本地坐标（与守卫同坐标系），不是屏幕像素
+          // 舞台本地坐标（与守卫同坐标系），不是屏幕像素；墨迹矩形口径同 sig()
           const layer = document.querySelector(".camera-layer");
           const s0 = layer ? (layer.getBoundingClientRect().width / layer.offsetWidth || 1) : 1;
-          const r = el.getBoundingClientRect();
+          let r = el.getBoundingClientRect();
+          try {
+            const range = document.createRange();
+            range.selectNodeContents(el);
+            const ink = range.getBoundingClientRect();
+            if (ink.width >= 8 && ink.height >= 8 && ink.width <= r.width + 1 && ink.height <= r.height + 1) r = ink;
+          } catch {}
           return r.width > 0 && r.height > 0 ? { w: Math.round(r.width / s0), h: Math.round(r.height / s0) } : null;
         }, aiCue.target);
       }
