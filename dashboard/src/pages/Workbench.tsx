@@ -366,7 +366,7 @@ export function Workbench({
         // 生成期的构建失败是常态（后续章节写到一半、整棵树暂时编译不过），
         // 下一章完成后会自动重试成功——按中性状态提示，不当错误吓人
         setPreviewNotice(`前 ${completed} 章已写完，画面工程整体还在生成中，预览会随后续章节完成自动就绪`);
-        if (import.meta.env.DEV) console.warn("incremental preview build failed:", error);
+        console.warn("incremental preview build failed:", error);
       })
       .finally(() => setIncrementalPreviewBuilding(false));
   }, [
