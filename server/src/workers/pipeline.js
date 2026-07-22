@@ -1,4 +1,4 @@
-import { existsSync, readdirSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, readFileSync, readdirSync, renameSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { db, getJob, logEvent, updateJob } from "../db.js";
 import { nextStage, repairChapterQuality, repairFromEvidence, runStage, stageDef } from "../stages.js";
@@ -19,6 +19,21 @@ import { preflightWarnings } from "../preflight.js";
  */
 const inFlight = new Set();
 const MAX_PARALLEL_JOBS = 2;
+
+// 质量修复循环的结构化实时态 sidecar：仿 .videoforge-chapter-progress.json，
+// 经 routes 的 chapterGeneration.quality 下发给前端。best-effort、绝不 throw，
+// 不得拖慢/中断循环；原子写（temp+rename）避免前端读到半截。
+const QUALITY_PROGRESS_FILE = ".videoforge-quality-progress.json";
+function writeQualityProgress(workspace, patch) {
+  try {
+    const path = join(workspace, "presentation", QUALITY_PROGRESS_FILE);
+    let current = {};
+    try { current = JSON.parse(readFileSync(path, "utf8")); } catch { /* 首次写或读到半截 */ }
+    const tmp = `${path}.tmp`;
+    writeFileSync(tmp, JSON.stringify({ ...current, ...patch, updatedAt: new Date().toISOString() }));
+    renameSync(tmp, path);
+  } catch { /* 进度 sidecar 仅供展示，任何异常都不得影响质量循环 */ }
+}
 
 async function advance(jobId) {
   if (inFlight.has(jobId)) return;
@@ -66,12 +81,38 @@ async function advance(jobId) {
       const secs = Math.round((Date.now() - t0) / 1000);
 
       if (!result.ok) {
-        updateJob(jobId, { status: "failed", error: result.note || "当前步骤没有完成" });
-        logEvent(jobId, job.stage, `stage FAILED after ${secs}s${result.note ? `: ${result.note}` : ""}`, "error");
+        const note = result.note || "当前步骤没有完成";
+        // 网络类瞬时故障自动重排（2026-07-22 job-33/34 实证：上游 504/fetch
+        // failed 耗尽调用内重试后阶段判 failed 等人工点重试，观感=莫名卡死）。
+        // 每阶段最多自动重排 2 次、45s 退避；等待期保持 running，服务重启时
+        // 恢复逻辑会照常回队列，不丢任务。非网络类错误照旧人工介入。
+        const transient = /fetch failed|HTTP 5\d\d|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|上游返回非 JSON/i.test(note);
+        if (transient) {
+          let meta = {};
+          try { meta = JSON.parse(getJob(jobId).meta || "{}"); } catch {}
+          const retries = meta.autoRetries?.[job.stage] || 0;
+          if (retries < 2) {
+            updateJob(jobId, { meta: JSON.stringify({ ...meta, autoRetries: { ...(meta.autoRetries || {}), [job.stage]: retries + 1 } }) });
+            logEvent(jobId, job.stage, `网络类故障，45s 后自动重试（第 ${retries + 1}/2 次）：${note.slice(0, 200)}`, "warning");
+            setTimeout(() => {
+              try {
+                const current = getJob(jobId);
+                if (current?.status === "running" && current.stage === job.stage) updateJob(jobId, { status: "queued" });
+              } catch {}
+            }, 45000);
+            break;
+          }
+        }
+        updateJob(jobId, { status: "failed", error: note });
+        logEvent(jobId, job.stage, `stage FAILED after ${secs}s: ${note}`, "error");
         break;
       }
       if (job.stage === "chapter_gen") {
+        const ws = getJob(jobId).workspace;
+        // 逐屏审计的进度回调：把"正在校验第 X 章第 Y 屏"写进 sidecar
+        const auditProgress = (phase) => ({ chapter, step }) => writeQualityProgress(ws, { phase, chapter, step });
         try {
+          writeQualityProgress(ws, { phase: "lint", round: 0, maxRound: 2, chapter: null, step: null, score: null, targetScore: null, checkedSteps: null, startedAt: new Date().toISOString(), roundStartedAt: new Date().toISOString() });
           await buildPresentation(getJob(jobId));
           // 静态 linter 执法模式（2026-07-16 转正：7 个满分作品实测零误伤）：
           // error 级违规直接判章节生成失败并给出毫秒级归因证据；warn 只记账。

@@ -51,18 +51,32 @@ export function stageDef(stageId) {
 
 // ---------------------------------------------------------------------------
 
-function sh(cmd, args, cwd, jobId, stage, envExtra = {}) {
+function sh(cmd, args, cwd, jobId, stage, envExtra = {}, onLine = null) {
   return new Promise((resolve) => {
     const child = spawn(cmd, args, { cwd, shell: true, env: { ...process.env, ...envExtra } });
     let out = "";
     let settled = false;
+    let lineBuf = "";
     const cap = (s) => (s.length > 20000 ? s.slice(-20000) : s);
     const finish = (result) => {
       if (settled) return;
       settled = true;
       resolve(result);
     };
-    child.stdout.on("data", (d) => (out = cap(out + d)));
+    child.stdout.on("data", (d) => {
+      out = cap(out + d);
+      // 按行流式转发（子进程 stdout 分块非按行对齐，用残留缓冲按 \n 切）。
+      // 用于 audio_synth 解析 VF_PROGRESS 逐段进度；onLine 内部异常绝不影响子进程。
+      if (onLine) {
+        lineBuf += d;
+        let nl;
+        while ((nl = lineBuf.indexOf("\n")) >= 0) {
+          const line = lineBuf.slice(0, nl);
+          lineBuf = lineBuf.slice(nl + 1);
+          try { onLine(line); } catch { /* 进度回调不得中断合成 */ }
+        }
+      }
+    });
     child.stderr.on("data", (d) => (out = cap(out + d)));
     child.on("error", (error) => {
       const note = `Unable to start ${cmd}: ${error.message}`;
@@ -94,9 +108,13 @@ function videoCodec(path) {
   });
 }
 
-function avatarProgress(jobId, percent, message, stage = "avatar_media") {
+// 通用阶段进度上报：写一条 progress|pct|msg 事件，前端按 stage===job.stage 消费。
+// 传 stage 即路由到对应阶段的 UI 块（audio_synth / avatar_media / …）。
+function stageProgress(jobId, percent, message, stage = "avatar_media") {
   logEvent(jobId, stage, `progress|${Math.max(0, Math.min(100, Math.round(percent)))}|${message}`);
 }
+// 历史别名：数字人阶段的既有 16 处调用继续可用，避免大范围改名引入风险。
+const avatarProgress = stageProgress;
 
 function writeJson(path, value) {
   writeFileSync(path, `${JSON.stringify(value, null, 2)}\n`);
@@ -360,6 +378,25 @@ function jobOptions(job) {
 }
 
 /**
+ * 校验一个工作阶段声称产出的文件真的落地了（存在且非空白）。agent 报 ok
+ * 不等于产物存在——尤其 API 模式模型有时会不产出就"完成"。缺失/空文件返回
+ * { ok:false, note }，让 pipeline 判该阶段失败而非放空稿过门。
+ */
+export function assertArtifacts(workspace, specs, minChars = 20) {
+  const missing = [];
+  for (const { file, label } of specs) {
+    const full = join(workspace, file);
+    if (!existsSync(full) || readFileSync(full, "utf8").trim().length < minChars) {
+      missing.push(label || file);
+    }
+  }
+  if (missing.length) {
+    return { ok: false, note: `模型报告完成但未产出必需文件：${missing.join("、")}。请重试本步骤。` };
+  }
+  return { ok: true };
+}
+
+/**
  * Keep the product-selected theme authoritative after an agent run. Agents
  * may edit any file in the presentation workspace, so the selected token file
  * and theme markers are restored deterministically before preview validation.
@@ -421,7 +458,15 @@ const runners = {
       `两份文件都必须自己走完各自的自检清单并修复所有 FAIL 项后才算完成。`,
       `不要停下来向用户提问——审批在流水线外部完成。做完即退出。`,
     ].join("\n");
-    return runAgent({ jobId: job.id, stage: "script_outline", cwd: job.workspace, prompt });
+    const result = await runAgent({ jobId: job.id, stage: "script_outline", cwd: job.workspace, prompt });
+    if (!result.ok) return result;
+    // agent 可能"报完成却没落地文件"（job-33：API 模式模型读不到工作区外的
+    // skill 后放弃产出，仍返回 ok）。校验产物存在且非空，缺失即判失败，让门禁
+    // 不被空稿放行、UI 显示真实原因、pipeline 得以重试/回喂。
+    return assertArtifacts(job.workspace, [
+      { file: "script.md", label: "口播稿 script.md" },
+      { file: "outline.md", label: "开发计划 outline.md" },
+    ]);
   },
 
   async scaffold(job) {
@@ -549,13 +594,30 @@ const runners = {
 
     let r = await sh("npm", ["run", "extract-narrations"], presDir, job.id, "audio_synth");
     if (!r.ok) return r;
+    const chapterTitle = {};
     try {
       const manifest = buildPresentationManifest(presDir);
+      for (const chapter of manifest.chapters) chapterTitle[chapter.id] = chapter.title;
       logEvent(job.id, "audio_synth", `已建立作品 manifest：${manifest.chapters.length} 章、${manifest.segments.length} 段`);
     } catch (error) {
       return { ok: false, note: `作品 manifest 建立失败：${error.message}` };
     }
-    r = await sh("node", ["scripts/synthesize-audio-node.mjs"], presDir, job.id, "audio_synth", { [config.tts.apiKeyEnv]: apiKey });
+    // 逐段进度 + ETA：解析子进程的 VF_PROGRESS 行。ETA 只按真实合成段的滚动
+    // 均耗时（+1.5s 段间限速）外推，跳过的 skip 段不计入以免稀释估计。
+    let synCount = 0;
+    let synMs = 0;
+    const onAudioLine = (line) => {
+      if (!line.startsWith("VF_PROGRESS ")) return;
+      const p = JSON.parse(line.slice("VF_PROGRESS ".length));
+      if (!p || !p.n) return;
+      if (!p.skipped && p.ms) { synCount += 1; synMs += p.ms; }
+      const avgMs = synCount ? synMs / synCount + 1500 : 8000;
+      const remainMin = Math.ceil((p.n - p.k) * avgMs / 60000);
+      const title = chapterTitle[p.chapter] ? `（${chapterTitle[p.chapter]}）` : "";
+      const eta = p.k < p.n && remainMin > 0 ? `，预计还需约 ${remainMin} 分钟` : "";
+      stageProgress(job.id, Math.round((p.k / p.n) * 100), `正在合成第 ${p.k}/${p.n} 段${title}${eta}`, "audio_synth");
+    };
+    r = await sh("node", ["scripts/synthesize-audio-node.mjs"], presDir, job.id, "audio_synth", { [config.tts.apiKeyEnv]: apiKey }, onAudioLine);
     const usageMatch = r.output?.match(/VF_USAGE\s+(\{[^\n]+\})/);
     if (usageMatch) {
       try {

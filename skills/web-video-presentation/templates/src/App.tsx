@@ -26,8 +26,10 @@ import { CHAPTERS } from "./registry/chapters";
  * normally, this value is unused — auto-advance fires on `audio.ended`.
  */
 function estimateMs(text: string): number {
-  if (!text) return 1500;
-  return Math.max(1500, text.length * 250);
+  if (!text) return 1800;
+  // +400ms 步间呼吸垫（2026-07-22）：真实配音的 mp3 自带尾部气口，估时没有
+  // ——无音频预览里连续短句步会一步紧接一步，观感"突然加速"。
+  return Math.max(1800, text.length * 250 + 400);
 }
 
 export default function App() {

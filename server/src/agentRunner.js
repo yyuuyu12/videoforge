@@ -2,7 +2,7 @@ import { spawn } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 import { homedir } from "node:os";
 import { extname, join, relative, resolve } from "node:path";
-import { config } from "./config.js";
+import { config, ROOT } from "./config.js";
 import { logEvent, recordUsage } from "./db.js";
 import { loadSettings } from "./settings.js";
 
@@ -355,6 +355,7 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
       { role: "user", content: userContent },
     ];
     reportProgress(jobId, stage, onProgress, 22, "模型已连接，正在分析任务");
+    let emptyResponses = 0;
     // 上限按最大作品规模留余量：5 章作品实测 ~40+ 轮（每章 read/write/tsc
     // 多轮），40 的旧上限在第 5 章末尾撞线（job#13 实测）。
     for (let turn = 0; turn < 100; turn++) {
@@ -406,9 +407,21 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
       messages.push(message);
       const calls = message.tool_calls ?? [];
       if (!calls.length) {
+        const finalText = String(message.content ?? "").trim();
+        // 空完成（既无工具调用也无文本）不是有效的"完成"，而是上游瞬断/504
+        // 恢复后返回的退化响应。若直接当 done，阶段会零产物却报成功
+        // （job-33 实证：读完 skill 后一次 504，紧接的空响应被当完成，稿件
+        // 零落地仍推进到门禁）。有限次重问，连续多次仍空则判失败，绝不静默放过。
+        if (!finalText) {
+          emptyResponses += 1;
+          logEvent(jobId, stage, `模型返回空响应（第 ${emptyResponses}/3 次，通常是上游瞬断），重新请求`, "warning");
+          if (emptyResponses >= 3) throw new Error("模型连续返回空响应，未产出任何结果（疑似上游不稳定）");
+          messages.push({ role: "user", content: "你上一步返回为空。请继续调用工具把任务做完；若确已完成，请用一句话列出你已写入的文件。" });
+          continue;
+        }
         reportProgress(jobId, stage, onProgress, 88, "模型任务完成，正在整理结果");
-        logEvent(jobId, stage, `API agent done\n--- tail ---\n${String(message.content ?? "").slice(-1500)}`);
-        return { ok: true, output: String(message.content ?? "") };
+        logEvent(jobId, stage, `API agent done\n--- tail ---\n${finalText.slice(-1500)}`);
+        return { ok: true, output: finalText };
       }
       const toolNames = calls.map((call) => call.function.name).join("、");
       reportProgress(jobId, stage, onProgress, Math.min(78, 30 + turn * 4), `正在执行：${toolNames}`);
@@ -429,24 +442,39 @@ async function runApiAgent({ jobId, stage, cwd, prompt, onProgress = () => {}, u
   }
 }
 
-async function executeApiTool(cwd, name, args) {
+export async function executeApiTool(cwd, name, args) {
   const { readFile, writeFile, readdir, mkdir } = await import("node:fs/promises");
   const { resolve, dirname, relative } = await import("node:path");
-  const safePath = (value = ".") => {
+  const workspaceRoot = resolve(cwd);
+  // 只读放行仓库内 skills/ 方法论目录：多个阶段的 prompt 明确命令模型去读
+  // `${skill}/SKILL.md` 与 references/*，而这些路径在工作区之外。订阅模式
+  // （claude -p / Agent SDK）无沙箱能读到，API 模式旧沙箱一律拒绝，导致模型
+  // 读不到方法论、空烧工具轮次、有时干脆不产出文件就"完成"（job-33 实证：
+  // 稿件阶段报 stage ok 却零文件落地）。写入仍严格限制在工作区内。
+  const skillsRoot = resolve(ROOT, "skills");
+  const within = (root, full) => {
+    const rel = relative(root, full);
+    return rel === "" || (!rel.startsWith("..") && !rel.includes(":"));
+  };
+  const writePath = (value = ".") => {
     const full = resolve(cwd, value);
-    const rel = relative(resolve(cwd), full);
-    if (rel.startsWith("..") || rel.includes(":")) throw new Error("路径超出工作区");
+    if (!within(workspaceRoot, full)) throw new Error("路径超出工作区");
     return full;
   };
-  if (name === "read_file") return readFile(safePath(args.path), "utf8");
+  const readPath = (value = ".") => {
+    const full = resolve(cwd, value);
+    if (within(workspaceRoot, full) || within(skillsRoot, full)) return full;
+    throw new Error("路径超出工作区（只读方法论仅限 skills/）");
+  };
+  if (name === "read_file") return readFile(readPath(args.path), "utf8");
   if (name === "write_file") {
-    const path = safePath(args.path);
+    const path = writePath(args.path);
     await mkdir(dirname(path), { recursive: true });
     await writeFile(path, args.content, "utf8");
     return `已写入 ${args.path}`;
   }
   if (name === "list_files") {
-    const entries = await readdir(safePath(args.path), { withFileTypes: true });
+    const entries = await readdir(readPath(args.path), { withFileTypes: true });
     return entries.map((entry) => `${entry.isDirectory() ? "[dir]" : "[file]"} ${entry.name}`).join("\n");
   }
   if (name === "run_command") return runWorkspaceCommand(args.command, cwd);

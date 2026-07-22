@@ -136,6 +136,30 @@ async function inspectVisualQuality(page) {
     const contentLeaves = boxes.filter((b) => b.text && !/subtitle|caption/i.test(b.cls));
     const longestContentText = contentLeaves.reduce((max, b) => Math.max(max, b.text.replace(/\s+/g, "").length), 0);
     const longContentBlocks = contentLeaves.filter((b) => b.text.replace(/\s+/g, "").length > 28).length;
+    // 构图均衡（2026-07-22 用户反馈"6万贴边、右半全空"，先记账校准后转执法）：
+    // 内容整体包围盒占宽 <55% 且水平重心落在 38% 以外的单侧 = 单侧孤儿构图。
+    // 数字人作品正文左倾是给右窗让位（豁免）；空屏/单元素小屏不计。
+    let composition = null;
+    {
+      const avatarVisible = (() => {
+        const el = document.querySelector(".avatar-presenter");
+        if (!el) return false;
+        const r = el.getBoundingClientRect();
+        return r.width > 40 && getComputedStyle(el).display !== "none";
+      })();
+      if (!avatarVisible && contentLeaves.length >= 2) {
+        const minX = Math.min(...contentLeaves.map((b) => b.r.x));
+        const maxX = Math.max(...contentLeaves.map((b) => b.r.x + b.r.w));
+        const vw = window.innerWidth;
+        const spanRatio = (maxX - minX) / vw;
+        const centerRatio = ((minX + maxX) / 2) / vw;
+        composition = {
+          spanRatio: Math.round(spanRatio * 100) / 100,
+          centerRatio: Math.round(centerRatio * 100) / 100,
+          sideOrphan: spanRatio < 0.55 && (centerRatio < 0.38 || centerRatio > 0.62),
+        };
+      }
+    }
     // 文字压图（2026-07-20 补盲区）：文字叶子盖在位图媒体（img/video/canvas）
     // 上 = 不可读。svg 不算媒体（手绘图表的 HTML 标签叠放是设计内）；
     // figcaption（媒体容器角标本来骑在边框上）与数字人窗内媒体豁免。
@@ -216,7 +240,7 @@ async function inspectVisualQuality(page) {
       score, collisions, collisionPairs, subtitleSafe, subtitleTextLength: subtitleText.length,
       subtitleLines, subtitleTooLong, subtitleMultiline, longestContentText,
       longContentBlocks, headingViolations, textOnMedia, containerOverflow,
-      containerOverflowDetails, wrapViolations, sampledElements: boxes.length,
+      containerOverflowDetails, wrapViolations, composition, sampledElements: boxes.length,
     };
   });
 }
@@ -356,7 +380,7 @@ export async function captureJobCover(job, { requireAvatar = false } = {}) {
  * intentionally DOM-based so failures identify the offending element instead
  * of relying on brittle pixel thresholds.
  */
-async function inspectPreviewQualityInternal(job, { captureScreenshots }) {
+async function inspectPreviewQualityInternal(job, { captureScreenshots, onProgress = null }) {
   const presDir = join(job.workspace, "presentation");
   if (!existsSync(join(presDir, "package.json"))) throw new Error("presentation has not been generated");
   const previewUrl = await preparePreview(job);
@@ -382,6 +406,11 @@ async function inspectPreviewQualityInternal(job, { captureScreenshots }) {
     for (let index = 0; index < 250; index += 1) {
       const cursor = await readPreviewCursor(page);
       if (cursor.chapter < 0 || cursor.step < 0) throw new Error("preview progress controls are unavailable");
+      // 逐屏进度（1-based，与 pipeline 人读文案口径一致）：供质量进度面板显示
+      // "正在校验第 X 章第 Y 屏"。回调 best-effort，内部异常绝不打断审计。
+      if (onProgress) {
+        try { onProgress({ index, chapter: cursor.chapter + 1, step: cursor.step + 1 }); } catch { /* 进度回调不得中断审计 */ }
+      }
       const audit = await inspectCurrentPreviewStep(page);
       const screenshot = captureScreenshots
         ? `${String(index + 1).padStart(3, "0")}-c${cursor.chapter + 1}-s${cursor.step + 1}.png`
@@ -444,13 +473,13 @@ async function inspectPreviewQualityInternal(job, { captureScreenshots }) {
 
 /** Cheap first-pass gate: render every step and inspect layout geometry without
  * writing screenshots. Passing work proceeds directly to human approval. */
-export function inspectPreviewQuality(job) {
-  return inspectPreviewQualityInternal(job, { captureScreenshots: false });
+export function inspectPreviewQuality(job, { onProgress = null } = {}) {
+  return inspectPreviewQualityInternal(job, { captureScreenshots: false, onProgress });
 }
 
 /** Evidence mode for manual QA and failed first-pass checks. */
-export function auditPreviewQuality(job) {
-  return inspectPreviewQualityInternal(job, { captureScreenshots: true });
+export function auditPreviewQuality(job, { onProgress = null } = {}) {
+  return inspectPreviewQualityInternal(job, { captureScreenshots: true, onProgress });
 }
 
 export async function renderJob(job) {

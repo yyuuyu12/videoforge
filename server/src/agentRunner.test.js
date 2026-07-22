@@ -1,6 +1,9 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { isWorkspacePath, parseChatCompletion } from "./agentRunner.js";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { executeApiTool, isWorkspacePath, parseChatCompletion } from "./agentRunner.js";
 import { config } from "./config.js";
 
 test("Agent workspace paths stay inside the configured workspace root", () => {
@@ -50,4 +53,30 @@ test("parseChatCompletion 聚合 SSE 流式的 tool_calls（按 index 合并 nam
 test("parseChatCompletion 空响应报错、垃圾响应报错", () => {
   assert.equal(parseChatCompletion("", "").ok, false);
   assert.equal(parseChatCompletion("<html>502</html>", "text/html").ok, false);
+});
+
+test("executeApiTool 写限工作区内、读放行仓库内 skills 方法论", async () => {
+  const ws = mkdtempSync(join(tmpdir(), "vf-tool-"));
+  try {
+    // 写：工作区内成功
+    await executeApiTool(ws, "write_file", { path: "script.md", content: "口播稿" });
+    assert.equal(readFileSync(join(ws, "script.md"), "utf8"), "口播稿");
+    // 写：越界（../）被拒
+    await assert.rejects(
+      () => executeApiTool(ws, "write_file", { path: "../escape.md", content: "x" }),
+      /超出工作区/,
+    );
+    assert.equal(existsSync(join(ws, "..", "escape.md")), false);
+    // 读：prompt 命令读取的仓库内 skill 方法论（工作区外）现在放行
+    const skillDoc = await executeApiTool(ws, "read_file", { path: join(config.skills.webVideoPresentation, "SKILL.md") });
+    assert.equal(typeof skillDoc, "string");
+    assert.ok(skillDoc.length > 0);
+    // 读：skills 之外的越界路径仍被拒
+    await assert.rejects(
+      () => executeApiTool(ws, "read_file", { path: "../../settings.local.json" }),
+      /超出工作区/,
+    );
+  } finally {
+    rmSync(ws, { recursive: true, force: true });
+  }
 });

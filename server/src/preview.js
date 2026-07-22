@@ -136,10 +136,18 @@ async function performBuild(job, fingerprint) {
   return { built: true, fingerprint, url: `/preview/${job.id}/` };
 }
 
+// 已知失败指纹缓存（2026-07-22 job-34 实证：生成期语法错的同一棵树被面板
+// 轮询反复触发构建，同一 TS 错误刷了 12 条 error 事件 + 空烧 CPU，观感=卡死）。
+// 同一指纹失败过就直接复抛缓存错误，等代码真正变更（指纹变化）再重试构建。
+const failedBuilds = new Map();
+
 export async function buildPresentation(job) {
   const presDir = join(job.workspace, "presentation");
   if (!existsSync(join(presDir, "package.json"))) throw new Error("画面工程尚未生成");
   const fingerprint = presentationFingerprint(presDir);
+  const failed = failedBuilds.get(job.id);
+  if (failed && failed.fingerprint === fingerprint) throw new Error(failed.message);
+  if (failed) failedBuilds.delete(job.id);
   const active = builds.get(job.id);
   if (active?.fingerprint === fingerprint) return active.promise;
   if (active) {
@@ -149,6 +157,7 @@ export async function buildPresentation(job) {
 
   const promise = performBuild(job, fingerprint)
     .catch((error) => {
+      failedBuilds.set(job.id, { fingerprint, message: error.message });
       logEvent(job.id, "preview_build", error.message, "error");
       throw error;
     })

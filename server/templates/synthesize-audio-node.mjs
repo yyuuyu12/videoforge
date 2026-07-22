@@ -40,6 +40,9 @@ for (let i = 0; i < segments.length; i++) {
   if (!FORCE && existsSync(outPath)) {
     console.log(`${label}  skip (exists)`);
     skipped++;
+    // 机器可读逐段进度：父进程解析成 progress| 事件驱动前端进度条与 ETA。
+    // skip 段近乎瞬时，标注 skipped 让 ETA 的滚动均耗时不被其稀释。
+    console.log(`VF_PROGRESS ${JSON.stringify({ k: i + 1, n: segments.length, chapter: seg.chapter, skipped: true })}`);
     continue;
   }
 
@@ -90,8 +93,10 @@ for (let i = 0; i < segments.length; i++) {
       console.warn(`${label}  ⚠ no subtitle_file in response — cues will fall back to full text`);
     }
 
-    const secs = ((Date.now() - t0) / 1000).toFixed(1);
+    const elapsedMs = Date.now() - t0;
+    const secs = (elapsedMs / 1000).toFixed(1);
     console.log(`${label}  ✓ ${secs}s`);
+    console.log(`VF_PROGRESS ${JSON.stringify({ k: i + 1, n: segments.length, chapter: seg.chapter, ms: elapsedMs, skipped: false })}`);
     ok++;
     synthesizedChars += String(seg.text || "").length;
   } catch (err) {

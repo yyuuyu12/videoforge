@@ -44,6 +44,19 @@ function requestedCursor(chapters: ChapterDef[]): Cursor | null {
   if (rawChapter === null || rawChapter.trim() === "") return null;
   const chapter = Number(rawChapter);
   if (!Number.isInteger(chapter)) return null;
+  // 同章恢复步位（2026-07-22 根治"预览重挂载后从头重播"）：工作台面板在
+  // 逐页生成/修复期间会刷新 iframe（URL 带 ?chapter=N&revision=K），无条件
+  // 回到 step 0 会让正在看的那页反复从头播。若持久化光标就在同一章，恢复
+  // 到上次看到的步；切到别的章才从第 0 步开始。
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    if (raw) {
+      const stored = sanitize(JSON.parse(raw), chapters);
+      if (stored.chapter === clamp(chapter | 0, 0, chapters.length - 1)) return stored;
+    }
+  } catch {
+    /* ignore */
+  }
   return sanitize({ chapter, step: 0 }, chapters);
 }
 
