@@ -1135,8 +1135,8 @@ export function Workbench({
           <div className="vf-result-grid">
             <section>
               <b>配音</b>
-              <strong>{audit?.audio.ok ? `${audit.audio.segments} 段配音已校验` : "正在校验配音文件"}</strong>
-              <span>{audit?.audio.ok ? "文件存在，可进入带声音预览" : "等待音频生成完成"}</span>
+              <strong>{!audit ? "正在校验配音文件" : audit.audio.ok ? `${audit.audio.segments} 段配音已校验` : "未检测到配音文件（0 段）"}</strong>
+              <span>{!audit ? "等待审计结果" : audit.audio.ok ? "文件存在，可进入带声音预览" : "音频合成未产出配音——可在右侧对话反馈，或重跑音频合成阶段"}</span>
             </section>
             <section>
               <b>字幕</b>

@@ -597,6 +597,19 @@ const runners = {
 
     let r = await sh("npm", ["run", "extract-narrations"], presDir, job.id, "audio_synth");
     if (!r.ok) return r;
+    // job-34 0 段静默放行实翻车（2026-07-22）的独立防线：提取脚本曾输出 0 段却 exit 0，
+    // 阶段照样 ok，放行到 gate_audio，前端永远卡在"正在校验配音文件"。这里在合成前自查
+    // 提取脚本写到 presentation 根目录的 audio-segments.json（解析失败或空数组即拦下）。
+    let extractedSegments;
+    try {
+      extractedSegments = JSON.parse(readFileSync(join(presDir, "audio-segments.json"), "utf8"));
+    } catch {
+      extractedSegments = null;
+    }
+    if (!Array.isArray(extractedSegments) || extractedSegments.length === 0) {
+      logEvent(job.id, "audio_synth", "口播提取产出 0 段（audio-segments.json 缺失/解析失败/空数组），已拦截，不放行合成");
+      return { ok: false, note: "口播提取产出 0 段：通常是 src/registry/chapters.ts 写法与提取脚本不兼容，或各章 narrations 缺失。请检查 src/registry/chapters.ts 与各章 narrations.ts，修复后重试本阶段。" };
+    }
     const chapterTitle = {};
     try {
       const manifest = buildPresentationManifest(presDir);

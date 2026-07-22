@@ -1,5 +1,26 @@
 # VideoForge 项目记忆
 
+## 2026-07-22 深夜：job-34 配音 0 段静默放行根治（提取器第 3 次形状翻车 + 双防线）
+
+- **现象**：job-34 停 gate_audio，前端永远"正在校验配音文件"。真相：extract-narrations 输出
+  `extracted 0 segments from 0 chapters` 却 exit 0，audio_synth 照样 ok 放行，`public/audio` 根本不存在，
+  审计 `audio.ok=false` 无限挂起。
+- **根因**：registry 形状假设第 3 次翻车（前两次：job-26 组合导入、job-29 扁平文件）。job-34 模型用紧凑
+  工厂写法 `const def=(id,...)=>({id,...}); CHAPTERS=[def("coldopen","流量奖励谁",...)]`——没有任何
+  `id:` 字面量，提取器正则匹配 0 个 id 且**0 章不报错**。
+- **三处根治（全部实弹验证）**：
+  1. 提取器双策略：策略①`id:"x"` 字面量（既有路径行为不变）→ 0 命中时策略②「字面量∩磁盘」（registry
+     全部字符串字面量按首现去重，只留能在 src/chapters/ 解析出 narrations 的）→ 仍 0 章**硬 throw**。
+     真源 claude-skills + 仓库快照 + job-34 工作区三份 SHA256 一致；job-34 实跑 140 段/20 章。
+  2. stages.js audio_synth 独立防线：合成前读 audio-segments.json，缺失/坏 JSON/空数组一律
+     `{ok:false}` 拦下，不再依赖提取脚本自觉（**需重启 server 生效**）。
+  3. Workbench gate_audio 卡片三态：audit 未加载="正在校验"；ok=N 段已校验；已加载但 !ok=如实报
+     "未检测到配音文件（0 段）"+ 重跑指引，不再用进行时文案掩盖失败。
+- **教训**：确定性脚本"0 产出 + exit 0"与"失败"必须等价——凡按内容驱动下游的提取/编排环节，空结果
+  一律硬失败（与 readChapterStructure 0 章大声失败同一条律，管辖不同层）。
+- 本批为管理者模式首单：3 个 opus 子任务并行修复（Workflow），管理者验收（哈希/diff/node --check/
+  全量 build）后隔离提交，避开其他会话在途文件（JobDetail.tsx、cancellation.test.js）。
+
 ## 2026-07-22 深夜：P0-A 音效层落地（多助理路线首件）
 
 - 机制：效果件（whip/Slam/Counter）在真实播放时把触发时刻 push 进 `window.__vfSfx`
