@@ -1,5 +1,22 @@
 # VideoForge 项目记忆
 
+## 2026-07-22 晚批次：word 口播触发真音频验证 ✅ + MediaFrame/whip 视觉验收 ✅（两项遗留清零）
+
+- **job-30 真实音频全链走通**：approve-all → TTS 54s（19 段，MiniMax ~¥0.5）→ 字幕 charMs 1s →
+  渲染 187s → output.mp4 11MB，渲染期视觉评分 100/100。
+- **word 触发字级精度实证（v2b 核心卖点首次真音频验证）**：toolchain 步 2 的 Counter
+  word="十分钟"，cue 字级时刻 3200ms + Counter delay 250ms = 预期起跑 3450ms；无头自动模式实测
+  audioT 3552ms 采样点显示"2 分钟"（按 ease-out 反推起跑 ≈3450ms，误差 < 一个采样间隔）；触发前
+  全程零位待命。**成片双帧铁证**：36.5s（触发前）无 Counter，40.5s（触发后）"10 分钟"落定 +
+  "口播稿" WordMark 跟读高亮同步点亮——字级触发完整烤进 MP4。
+  验证工具：probe 用 addInitScript 劫持 `new Audio()`（音频元素不进 DOM，querySelector 采不到）。
+- **MediaFrame 视觉验收**（job-31 两处实拍）：描边浮卡/左上角标骑框/rotateY 微倾/暗角/框内 Ken
+  Burns（14s 周期连续运动）契约全部到位；媒体内容是模型放的"素材待提供"占位块——**容器合格，
+  真实截图素材要等素材管线**（竞品差距清单第 2 项）。
+- **whip 甩切取证**：入步 70ms 实测 `.camera-punch` scale 1.105 + blur 9.2px + WAAPI 活跃，正是
+  1.16→1/14px→0 曲线中段；190ms 一次性动画静帧呈现有限，运行时读数为准。
+- 两个作品状态：job-30 = done（成片可看），job-31 停 gate_chapters 待验收。
+
 ## 2026-07-22 下午批次：job-31 泛化考卷（2374 字教程文，11 章 64 步）暴露并根治五缺陷
 
 用户指令"换一篇 1000 字+文案重走检测流程"。job-31（art-118 豆包学习技巧）最终：结构 90 过门、
