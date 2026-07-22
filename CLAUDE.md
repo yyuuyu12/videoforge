@@ -20,7 +20,7 @@ npm run server / npm run dashboard          # 开发：API :5401 + Vite :5400
 - `server/src/agentRunner.js` — 生成引擎三路径：订阅模式走 Claude Agent SDK（主）→ `claude -p`（兜底）；API 模式走 OpenAI 兼容工具循环
 - `server/src/douyin.js` — TikHub、原声选择、Whisper、完整性校验
 - `server/src/devServers.js` — 按作品分配 :5300-5399 预览端口
-- **质量线五件**：`chapterLint.js`（章节静态执法：字号/写死颜色/超长文本/截图裸放）、`subtitleCheck.js`（字幕契约：≤10 字/时间递增/尾标点/字级时间轴对齐）、`cameraCheck.js`（镜头声明：词表/倍率/密度档位预算/whip 甩切预算）、`effectScore.mjs` + `effectScoreRunner.js`（博主质感打分：fx密度/强效果占比/平淡游程/切字，已接进 chapter_gen 后管线，`config.effectScore.gate` 默认 false=只记账校准）、`qualityLedger.js`（质量账本 JSONL + 回写铁律统计，`ledgerStats` 复发缺陷已回流注入 chapter_gen prompt）
+- **质量线五件**：`chapterLint.js`（章节静态执法：字号/写死颜色/超长文本/截图裸放/**跨章复读文案**——同句 ≥3 章即 error）、`subtitleCheck.js`（字幕契约：≤10 字/时间递增/尾标点/字级时间轴对齐）、`cameraCheck.js`（镜头声明：词表/倍率/密度档位预算/whip 甩切预算）、`effectScore.mjs` + `effectScoreRunner.js`（博主质感打分：fx密度/强效果占比/平淡游程/切字，已接进 chapter_gen 后管线，`config.effectScore.gate` **2026-07-22 起 true**=低于 72 修一轮、仍不过判失败）、`qualityLedger.js`（质量账本 JSONL + 回写铁律统计，`ledgerStats` 复发缺陷已回流注入 chapter_gen prompt）。结构审计（render.js）另有**跨屏同质化门**：复杂结构签名（≥3 有形件）单一垄断 >60% 且跨 ≥3 章即压分修复（极简大字屏豁免）
 - **确定性检验失败自动回喂修复**（2026-07-20）：pipeline 里 lint/camera error 各自动回喂模型修复 ≤2 轮再判失败（`stages.repairFromEvidence`）；结构分 3 轮截图修复照旧
 - **对话修改三件**：`feedbackRouter.js`（意图路由：同步类→重跑管线不进 Agent）、`feedbackTransaction.js`（受保护事务：快照/白名单/门禁对比/自动回滚）、agentRunner 的 feedbackEngine 选路
 - **运维两件**：`preflight.js`（依赖服务状态与开工预警）、`servicesControl.js`（模型服务一键启停，设置页按钮）

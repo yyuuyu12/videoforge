@@ -261,7 +261,38 @@ async function inspectCurrentPreviewStep(page) {
       const r = el.getBoundingClientRect();
       return r.width > 8 && r.height > 8 && !el.textContent?.trim();
     }).length;
-    return { offenders: offenders.slice(0, 20), overflowCount: offenders.length, subtitleInFrame, avatarInFrame, emptyText };
+    // 版式几何签名（2026-07-22 job-32 同质化盲区）：只取"有形结构件"——
+    // 带背景/边框的卡片记量化位置+尺寸、H1-H3 记量化位置；纯文本不进签名
+    // （文字宽度随文案抖动会把视觉相同的模板屏误判为不同，job-32 实测校准）。
+    // 与类名无关：共享组件套模板时几何必然相同，换类名照抄布局也逃不掉。
+    let layoutSignature = "";
+    {
+      const scene = document.querySelector(".camera-breath") || document.body;
+      const parts = [];
+      for (const el of scene.querySelectorAll("*")) {
+        if (!(el instanceof HTMLElement)) continue;
+        const r = el.getBoundingClientRect();
+        if (r.width < 24 || r.height < 24) continue;
+        const cs = getComputedStyle(el);
+        if (cs.display === "none" || cs.visibility === "hidden") continue;
+        const boxed = cs.backgroundColor !== "rgba(0, 0, 0, 0)" || (Number.parseFloat(cs.borderTopWidth) || 0) > 0;
+        if (boxed) {
+          parts.push(`B:${Math.round(r.x / 64)},${Math.round(r.y / 64)},${Math.round(r.width / 64)},${Math.round(r.height / 64)}`);
+        } else if (/^H[1-3]$/.test(el.tagName)) {
+          parts.push(`${el.tagName}:${Math.round(r.x / 64)},${Math.round(r.y / 64)}`);
+        }
+      }
+      // 极简屏豁免（job-27 校准：满分作品 90% 屏是"居中大字"，几何天然趋同
+      // ——那是风格不是偷懒）：结构件 <3 不构成"模板骨架"，不参与垄断统计。
+      const boxedCount = parts.filter((p) => p.startsWith("B:")).length;
+      if (boxedCount >= 3) {
+        const joined = parts.sort().join("|");
+        let hash = 5381;
+        for (let i = 0; i < joined.length; i += 1) hash = ((hash * 33) ^ joined.charCodeAt(i)) >>> 0;
+        layoutSignature = hash.toString(16);
+      }
+    }
+    return { offenders: offenders.slice(0, 20), overflowCount: offenders.length, subtitleInFrame, avatarInFrame, emptyText, layoutSignature };
   });
   const visual = await inspectVisualQuality(page);
   const structuralPenalty = audit.overflowCount * 8 + (audit.subtitleInFrame ? 0 : 15) + (audit.avatarInFrame ? 0 : 10) + Math.min(5, audit.emptyText) + (visual.subtitleSafe ? 0 : 25);
@@ -363,12 +394,38 @@ async function inspectPreviewQualityInternal(job, { captureScreenshots }) {
       if (next.chapter === cursor.chapter && next.step === cursor.step) break;
     }
     const worst = steps.reduce((lowest, item) => item.score < lowest.score ? item : lowest, steps[0]);
-    const score = worst?.score ?? 0;
+    let score = worst?.score ?? 0;
+    let pass = steps.length > 0 && steps.every((step) => step.pass);
+    // 跨屏同质化门（2026-07-22 job-32 实证：13 章 66 屏一个模板刻出来，逐屏
+    // 几何全干净 → 90 分通过——"每屏单看都对"看不见"整片一个样"）。
+    // 判定：≥12 屏、单一版式签名占比 >60%、且横跨 ≥3 章 = 违规压分。
+    const signatureStats = new Map();
+    for (const step of steps) {
+      if (!step.layoutSignature) continue;
+      const entry = signatureStats.get(step.layoutSignature) || { count: 0, chapters: new Set() };
+      entry.count += 1;
+      entry.chapters.add(step.chapter);
+      signatureStats.set(step.layoutSignature, entry);
+    }
+    const dominant = [...signatureStats.entries()].sort((a, b) => b[1].count - a[1].count)[0];
+    const layoutDiversity = {
+      uniqueSignatures: signatureStats.size,
+      dominantShare: dominant ? Math.round((dominant[1].count / Math.max(1, steps.length)) * 100) / 100 : 0,
+      dominantChapters: dominant ? dominant[1].chapters.size : 0,
+      dominantSignature: dominant ? dominant[0] : null,
+      violation: false,
+    };
+    if (steps.length >= 12 && layoutDiversity.dominantShare > 0.6 && layoutDiversity.dominantChapters >= 3) {
+      layoutDiversity.violation = true;
+      score = Math.min(score, 75);
+      pass = false;
+    }
     const result = {
-      score, pass: steps.length > 0 && steps.every((step) => step.pass),
+      score, pass,
       viewport: { width: 1920, height: 1080 }, checkedSteps: steps.length,
       mode: captureScreenshots ? "visual-evidence" : "structure-first",
       screenshotsCaptured: captureScreenshots ? steps.length : 0,
+      layoutDiversity,
       worstStep: worst, steps, checkedAt: new Date().toISOString(),
     };
     if (captureScreenshots && worst?.screenshot) {

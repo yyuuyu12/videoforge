@@ -84,3 +84,44 @@ test("干净章节全绿", () => {
   assert.equal(result.pass, true);
   assert.equal(result.findings.length, 0);
 });
+
+function makeMultiChapter(chapters) {
+  const presDir = mkdtempSync(join(tmpdir(), "vf-lint-multi-"));
+  for (const [dir, files] of Object.entries(chapters)) {
+    const chapterDir = join(presDir, "src", "chapters", dir);
+    mkdirSync(chapterDir, { recursive: true });
+    for (const [name, content] of Object.entries(files)) {
+      writeFileSync(join(chapterDir, name), content);
+    }
+  }
+  return presDir;
+}
+
+test("跨章复读：同一句出现在 ≥3 章判 error（job-32 实证）", () => {
+  const tail = "这不是孤立指标，要放进完整的分发链路里理解。";
+  const presDir = makeMultiChapter({
+    "01-a": { "narrations.ts": `export const narrations=["视频进入冷启动。${tail}"];\n` },
+    "02-b": { "narrations.ts": `export const narrations=["随机曝光五百次。${tail}"];\n` },
+    "03-c": { "narrations.ts": `export const narrations=["完播与点赞两道闸门。${tail}"];\n` },
+  });
+  const result = lintChapters(presDir);
+  assert.equal(result.pass, false);
+  const dup = result.findings.filter((f) => f.rule === "cross-chapter-repetition");
+  assert.equal(dup.length, 1);
+  assert.match(dup[0].detail, /3 个章节/);
+});
+
+test("跨章复读：两章重复不判、JSX 填充文案三章重复判", () => {
+  const two = makeMultiChapter({
+    "01-a": { "narrations.ts": 'export const narrations=["先看真实受众反馈情况"];\n' },
+    "02-b": { "narrations.ts": 'export const narrations=["先看真实受众反馈情况"];\n' },
+  });
+  assert.equal(lintChapters(two).findings.filter((f) => f.rule === "cross-chapter-repetition").length, 0);
+  const jsx = makeMultiChapter({
+    "01-a": { "A.tsx": 'export const A=()=><span>{"先看真实受众反馈"}</span>;\n' },
+    "02-b": { "B.tsx": 'export const B=()=><span>{"先看真实受众反馈"}</span>;\n' },
+    "03-c": { "C.tsx": 'export const C=()=><span>{"先看真实受众反馈"}</span>;\n' },
+  });
+  const dup = lintChapters(jsx).findings.filter((f) => f.rule === "cross-chapter-repetition");
+  assert.equal(dup.length, 1);
+});

@@ -165,20 +165,31 @@ async function advance(jobId) {
                 const { score, defects = [], dimensions = {} } = es.card;
                 recordQualityEntry({ kind: "effect-score", jobId, score, dimensions, defects: { "effect-defect": defects.length } });
                 logEvent(jobId, "quality", `效果打分：${score}/100${defects.length ? `——${defects.slice(0, 4).join("；")}` : "（博主质感达标）"}`, score < (config.effectScore.minScore ?? 72) ? "warning" : "info");
-                if (config.effectScore.gate && score < (config.effectScore.minScore ?? 72) && defects.length) {
-                  logEvent(jobId, "quality", `效果分低于门禁 ${config.effectScore.minScore}，自动回喂效果向修复`, "warning");
+                const minScore = config.effectScore.minScore ?? 72;
+                if (config.effectScore.gate && score < minScore && defects.length) {
+                  logEvent(jobId, "quality", `效果分低于门禁 ${minScore}，自动回喂效果向修复`, "warning");
                   const fixed = await repairFromEvidence(getJob(jobId), { title: "博主质感不足（效果打分未达标）", evidence: defects.slice(0, 8), rule: "屏上数字用 <Counter>/<Slam> 且传 word 触发；每章≥2 处 <WordMark>；关键结论/对比用 <Annotate>/<Shine>；强推近(focus/magnify)踩在关键数字步；截图包 <MediaFrame>" });
+                  let after = score;
                   if (fixed.ok) {
                     await buildPresentation(getJob(jobId));
                     const es2 = await runEffectScore(jobId, { port: config.port });
                     if (es2.ok) {
-                      recordQualityEntry({ kind: "effect-score", jobId, phase: "repair-1", score: es2.card.score, dimensions: es2.card.dimensions, defects: { "effect-defect": (es2.card.defects || []).length } });
-                      logEvent(jobId, "quality", `效果修复后：${es2.card.score}/100`, "info");
+                      after = es2.card.score;
+                      recordQualityEntry({ kind: "effect-score", jobId, phase: "repair-1", score: after, dimensions: es2.card.dimensions, defects: { "effect-defect": (es2.card.defects || []).length } });
+                      logEvent(jobId, "quality", `效果修复后：${after}/100`, after < minScore ? "warning" : "info");
                     }
+                  }
+                  // 门禁语义（2026-07-22 开门）：修复一轮仍不达标 = 阶段失败，
+                  // 与结构门同权重——绝不再把"画面偏平"的作品送到人工验收面前。
+                  if (after < minScore) {
+                    throw new Error(`效果打分 ${after}/100 低于门禁 ${minScore}（已自动修复一轮仍未达标）：${defects.slice(0, 3).join("；")}`);
                   }
                 }
               }
             } catch (esError) {
+              // 门禁失败必须穿透（与 lint 的 /处违规/ 同款）；只有打分器自身
+              // 故障（起不来/超时）才降级为警告，不因测量工具挂了冤枉作品。
+              if (/低于门禁/.test(esError.message)) throw esError;
               logEvent(jobId, "quality", `效果打分异常：${esError.message}`, "warning");
             }
           }

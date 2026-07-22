@@ -10,6 +10,7 @@ import { loadSettings, minimaxKey } from "./settings.js";
 import { typecheckPresentation } from "./preview.js";
 import { buildPresentationManifest } from "./chapterMetadata.js";
 import { validateSubtitleCues, cueEvidence } from "./subtitleCheck.js";
+import { readChapterStructure } from "./cameraChoreographer.js";
 import { recordQualityEntry, ledgerStats } from "./qualityLedger.js";
 import { health as heygemHealth, submitJob, taskStatus, downloadResult } from "./heygem.js";
 
@@ -835,8 +836,21 @@ export async function repairChapterQuality(job, audit) {
     .filter((step) => !step.pass)
     .sort((a, b) => a.score - b.score)
     .slice(0, 6);
-  if (!failed.length) return { ok: true, note: "没有需要修复的低分画面" };
-  const imagePaths = failed.map((step) => join(
+  // 跨屏同质化违规（2026-07-22）：全局缺陷，逐屏分都可能 ≥90——没有低分屏
+  // 也必须走修复，证据换成"垄断签名的代表屏"（不同章各取一张）。
+  const homogeneity = audit.layoutDiversity?.violation ? audit.layoutDiversity : null;
+  if (!failed.length && !homogeneity) return { ok: true, note: "没有需要修复的低分画面" };
+  const homoSamples = [];
+  if (homogeneity) {
+    const seenChapters = new Set();
+    for (const step of audit.steps || []) {
+      if (step.layoutSignature !== homogeneity.dominantSignature || seenChapters.has(step.chapter)) continue;
+      seenChapters.add(step.chapter);
+      if (step.screenshot) homoSamples.push(step);
+      if (homoSamples.length >= 4) break;
+    }
+  }
+  const imagePaths = [...failed, ...homoSamples].filter((step) => step.screenshot).map((step) => join(
     job.workspace,
     "presentation",
     "public",
@@ -844,16 +858,15 @@ export async function repairChapterQuality(job, audit) {
     step.screenshot,
   )).filter(existsSync);
   // 章节定位（2026-07-22 根治 job-31 三轮修复全改错文件）：审计只有章节序号，
-  // 模型靠猜映射目录必然跑偏——从运行时真源 registry/chapters.ts 的数组字面量
-  // 顺序取 id（读实际产物，不猜 import 形状），把序号翻译成目录名喂给模型。
-  let chapterIds = [];
+  // 模型靠猜映射目录必然跑偏——用 readChapterStructure（四种 registry 形状
+  // 全兼容）把序号翻译成真实目录名喂给模型。
+  let chapterDirs = [];
   try {
-    const registrySrc = readFileSync(join(job.workspace, "presentation", "src", "registry", "chapters.ts"), "utf8");
-    chapterIds = [...registrySrc.matchAll(/\bid\s*:\s*["']([^"']+)["']/g)].map((m) => m[1]);
+    chapterDirs = readChapterStructure(join(job.workspace, "presentation")).dirs;
   } catch {}
   const findings = failed.map((step) => ({
     chapter: step.chapter + 1,
-    chapterDir: chapterIds[step.chapter] ? `src/chapters/${chapterIds[step.chapter]}/` : undefined,
+    chapterDir: chapterDirs[step.chapter] ? `src/chapters/${chapterDirs[step.chapter]}/` : undefined,
     step: step.step + 1,
     score: step.score,
     screenshot: step.screenshot,
@@ -872,7 +885,11 @@ export async function repairChapterQuality(job, audit) {
     `必须重新阅读 ${skill}/references/CHAPTER-CRAFT.md，并把它作为硬性验收标准。`,
     "已附上最低分画面的真实 1920×1080 截图。先逐张观察重叠、拥挤、字幕遮挡、文字密度和安全区问题，再定位对应章节代码。",
     `失败明细：${JSON.stringify(findings)}`,
-    "定位纪律：明细里的 chapterDir 就是缺陷所在目录，collisionPairs/containerOverflow 给出了压叠双方的选择器与文字摘录——先按类名/文字 grep 到具体行再改。分数最低的那一屏必须优先修复；不在明细里的章节不要动。",
+    findings.length ? "定位纪律：明细里的 chapterDir 就是缺陷所在目录，collisionPairs/containerOverflow 给出了压叠双方的选择器与文字摘录——先按类名/文字 grep 到具体行再改。分数最低的那一屏必须优先修复；不在明细里的章节不要动。" : "",
+    homogeneity ? [
+      `全局违规——跨屏同质化：全片 ${audit.checkedSteps} 屏中 ${Math.round(homogeneity.dominantShare * 100)}% 共享同一版式几何签名、横跨 ${homogeneity.dominantChapters} 章（附图为不同章的代表屏，肉眼即可见"一个模子刻全片"）。`,
+      "必须重构版式：不同章按各自内容从 EXEMPLARS.md 的版式骨架中选型（数据密度章用卡阵、叙事章用大字居中、对比章用分栏……），章内步进也要有布局演进；禁止一个共享模板+换文案套满全片。同时逐章检查文案：跨章逐字重复的填充句（如相同的观察A/观察B、相同的句式尾巴）必须改写为该章独有的具体内容。",
+    ].join("\n") : "",
     "硬性要求：每屏只保留一个主结论；正文说明最多两条且每条一行；单块中文正文超过 28 字必须删减或拆 step，禁止缩小字号硬塞。",
     "字幕必须与对应 narration/音频 step 一一对应，每次只显示一行短句，中文目标 8 字、硬上限 10 字，下一句出现时上一句消失。",
     "字幕安全带和数字人安全区内不得放正文、图表、关键数字或高对比装饰。任何非设计性重叠都必须消除。",

@@ -84,8 +84,9 @@ const DEFAULTS = {
   previewMode: "static",
   discovery: { intervalMinutes: 120, autoStart: true },
   // 效果打分（博主质感维）接入管线：enabled=跑并记账；gate=分数低于 minScore
-  // 时触发一次效果向修复（默认 false=只记账校准，稳定后再开门禁）。
-  effectScore: { enabled: true, gate: false, minScore: 72 },
+  // 时触发一次效果向修复、修复后仍不达标判阶段失败。2026-07-22 开门禁：
+  // job-32 全片零镜头零效果件打 63 分被记账模式放行到用户面前，是开门的实证。
+  effectScore: { enabled: true, gate: true, minScore: 72 },
 };
 
 function deepMerge(base, extra) {

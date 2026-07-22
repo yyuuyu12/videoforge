@@ -20,7 +20,7 @@ function walkChapterFiles(root, base = root) {
   return readdirSync(root, { withFileTypes: true }).flatMap((entry) => {
     const path = join(root, entry.name);
     if (entry.isDirectory()) return walkChapterFiles(path, base);
-    if (!/\.(tsx|css)$/.test(entry.name)) return [];
+    if (!/\.(tsx|ts|css)$/.test(entry.name) || entry.name.endsWith(".d.ts")) return [];
     return [path.slice(base.length + 1).replace(/\\/g, "/")];
   });
 }
@@ -60,7 +60,47 @@ function lintLine(rel, lineText, lineNo, findings, fileUsesMediaFrame = false) {
   }
 }
 
-/** 对 presentation/src/chapters 下全部 tsx/css 做静态检查。 */
+/** 跨章复读检测（2026-07-22 job-32 实证：12/13 章旁白挂同一句尾巴、
+ *  "观察A/观察B"填充文案三章逐字复读——单文件规则看不见跨章重复）。
+ *  按句子粒度统计（字符串字面量按 。！？； 切句，≥6 个中文字符才计），
+ *  同一句出现在 ≥3 个章节 = error（复读机文案，喂修复循环改写）。 */
+const DUP_MIN_CJK = 6;
+const DUP_MIN_CHAPTERS = 3;
+
+function collectDuplicateSentences(root, findings) {
+  const owners = new Map(); // sentence -> { chapters: Map(chapterKey -> {file, line}) }
+  for (const rel of walkChapterFiles(root)) {
+    if (!/\.(tsx|ts)$/.test(rel)) continue;
+    const chapterKey = rel.includes("/") ? rel.split("/")[0] : rel.replace(/\.(narrations)?\.?tsx?$/, "");
+    const lines = readFileSync(join(root, rel), "utf8").split("\n");
+    lines.forEach((text, index) => {
+      if (text.includes("lint-allow")) return;
+      for (const m of text.matchAll(/["'`]([^"'`]{6,})["'`]/g)) {
+        for (const raw of m[1].split(/[。！？；\n]/)) {
+          const sentence = raw.trim();
+          const cjk = (sentence.match(/[一-鿿]/g) || []).length;
+          if (cjk < DUP_MIN_CJK) continue;
+          const entry = owners.get(sentence) || { chapters: new Map() };
+          if (!entry.chapters.has(chapterKey)) entry.chapters.set(chapterKey, { file: rel, line: index + 1 });
+          owners.set(sentence, entry);
+        }
+      }
+    });
+  }
+  for (const [sentence, entry] of owners) {
+    if (entry.chapters.size < DUP_MIN_CHAPTERS) continue;
+    const first = entry.chapters.values().next().value;
+    findings.push({
+      file: first.file,
+      line: first.line,
+      rule: "cross-chapter-repetition",
+      severity: "error",
+      detail: `「${sentence.slice(0, 24)}」在 ${entry.chapters.size} 个章节逐字复读（${[...entry.chapters.keys()].slice(0, 4).join("、")}）——填充式文案，须改写为各章独有的具体内容`,
+    });
+  }
+}
+
+/** 对 presentation/src/chapters 下全部 tsx/ts/css 做静态检查。 */
 export function lintChapters(presDir) {
   const root = join(presDir, "src", "chapters");
   const findings = [];
@@ -69,6 +109,7 @@ export function lintChapters(presDir) {
     const usesMediaFrame = content.includes("MediaFrame");
     content.split("\n").forEach((text, index) => lintLine(rel, text, index + 1, findings, usesMediaFrame));
   }
+  collectDuplicateSentences(root, findings);
   const errors = findings.filter((f) => f.severity === "error");
   return {
     pass: errors.length === 0,

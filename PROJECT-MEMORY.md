@@ -1,5 +1,32 @@
 # VideoForge 项目记忆
 
+## 2026-07-22 深夜批次：job-32 同质化考卷——工作台四盲区根治（用户抓出"每页长得差不多"）
+
+用户自建 job-32（抖音推流机制，13 章 66 屏）过了全部门禁停 gate_chapters，但人眼一看：
+全片一个版式骨架（主卡+红空卡+观察A/B 双卡）、填充文案 12 章逐字复读（"先看真实受众反馈"等
+5 句）、旁白每段挂同一句尾巴、零镜头零效果件。**每屏单看全干净 → 90 分通过；"整片一个样"
+是全局缺陷，逐屏审计天然看不见。**四项根治（全部实弹验证）：
+
+1. **编排器结构读取第 4 种形状**（`readChapterStructure`，cameraChoreographer 导出、stages 修复
+   靶向共用）：job-32 的 registry 用 `import {id as i1} from "../chapters/01-coldopen"` re-export、
+   模块内 `export const id="coldstart"` ≠ 目录名——旧正则读 0 章静默空转 → 全片零镜头。新增：
+   registry 无 id 字面量时按 import 路径读各模块导出 id；**0 章一律 throw 大声失败**。四形状
+   测试锁定（cameraChoreographer.test.js）。
+2. **effectScore 开门禁**（gate=true, minScore=72）：job-32 全片零效果打 63 分被记账模式放行
+   ——开门的实证。语义 = 低于线自动修一轮、仍不过判阶段失败（错误穿透 catch 与 lint 同款）。
+3. **跨屏同质化门**（render.js）：每屏算"版式几何签名"（带背景/边框的结构件取量化位置尺寸 +
+   H1-H3 取位置；纯文本不进签名防文案宽度抖动；**结构件 <3 的极简屏豁免**——job-27 满分作品
+   90% 屏居中大字是风格不是偷懒）。签名垄断 >60% 且跨 ≥3 章 → 压分 75 判失败，修复证据附
+   不同章代表屏截图 + EXEMPLARS 选型指令。四作品判别实测：job-32 share=1.00 违规✓、
+   job-27 豁免✓、job-26 share=0.19✓、job-31 share=0.03✓。
+4. **chapterLint 跨章复读检测**（cross-chapter-repetition，error 级）：字符串按 。！？； 切句、
+   ≥6 中文字、同句 ≥3 章即报（walkChapterFiles 扩到 .ts 覆盖 narrations）。job-32 实弹：5 句
+   复读全数命中（各 12 章）。
+
+教训：①"逐屏都对"≠"整片是好作品"——全局维度（多样性/复读）需要独立的门；②解析 AI 代码
+的形状假设缺陷已第 4 次出现，readChapterStructure 是唯一合法入口，新形状先加测试再兼容；
+③门禁只记账 = 用户当人肉门禁，测量已可信就要开门。
+
 ## 2026-07-22 晚批次：word 口播触发真音频验证 ✅ + MediaFrame/whip 视觉验收 ✅（两项遗留清零）
 
 - **job-30 真实音频全链走通**：approve-all → TTS 54s（19 段，MiniMax ~¥0.5）→ 字幕 charMs 1s →

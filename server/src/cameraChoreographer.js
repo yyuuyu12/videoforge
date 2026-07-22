@@ -118,21 +118,50 @@ function extractSignalsInPage() {
 }
 
 /** 读章节顺序与每章步数（narrations 为真相源）。
- *  兼容单/双引号与压缩格式——job-25 实测用户模型写 id:'xxx' 紧凑风格，
- *  只认双引号会读出 0 章、编排整体空转。 */
-function readStructure(presDir) {
+ *  这是"解析 AI 代码不能猜形状"教训的集中地，已实证四种合法写法：
+ *  ①id:"xxx" 双引号 ②id:'xxx' 单引号/压缩（job-25）③扁平文件布局（job-29）
+ *  ④id 从章节模块 re-export，registry 里没有 id 字面量（job-32:
+ *    `import C3,{id as i3} from "../chapters/03-coldstart"`，且模块导出的
+ *    id="coldstart" ≠ 目录名"03-coldstart"）。
+ *  策略：registry 字面量优先；否则按 import 路径顺序逐个读模块自己的
+ *  `export const id`。读不出章节时调用方必须大声失败，绝不允许 0 章空转。 */
+export function readChapterStructure(presDir) {
   const chaptersTs = readFileSync(join(presDir, "src/registry/chapters.ts"), "utf8");
-  const order = [...chaptersTs.matchAll(/id:\s*["']([^"']+)["']/g)].map((m) => m[1]);
   const chaptersDir = join(presDir, "src/chapters");
-  const steps = order.map((id) => {
-    // 兼容子目录(<id>/narrations.ts)与扁平文件(<id>.narrations.ts)布局
-    const candidates = [join(chaptersDir, id, "narrations.ts"), join(chaptersDir, `${id}.narrations.ts`)];
+  // 形状①②：数组字面量里的 id 字段（此时 id 即目录/文件名约定）
+  let entries = [...chaptersTs.matchAll(/id:\s*["']([^"']+)["']/g)].map((m) => ({ id: m[1], dir: m[1] }));
+  // 形状④：registry 无 id 字面量 → 按 import 路径顺序读模块导出的 id
+  if (!entries.length) {
+    const dirs = [...chaptersTs.matchAll(/from\s*["']\.{1,2}\/chapters\/([^"']+)["']/g)]
+      .map((m) => m[1].replace(/\/(index)?(\.tsx?)?$/, "").split("/")[0]);
+    entries = dirs.map((dir) => {
+      let id = dir;
+      const moduleFiles = [
+        join(chaptersDir, dir, "index.tsx"),
+        join(chaptersDir, dir, "index.ts"),
+        join(chaptersDir, `${dir}.tsx`),
+      ];
+      for (const f of moduleFiles) {
+        if (!existsSync(f)) continue;
+        const m = readFileSync(f, "utf8").match(/export\s+const\s+id\s*=\s*["']([^"']+)["']/);
+        if (m) { id = m[1]; break; }
+      }
+      return { id, dir };
+    });
+  }
+  const steps = entries.map(({ dir }) => {
+    // 兼容子目录(<dir>/narrations.ts)与扁平文件(<dir>.narrations.ts)布局
+    const candidates = [join(chaptersDir, dir, "narrations.ts"), join(chaptersDir, `${dir}.narrations.ts`)];
     const f = candidates.find((p) => existsSync(p));
     if (!f) return 0;
     const n = readFileSync(f, "utf8");
     return [...n.matchAll(/(["'])(?:[^"'\\\n]|\\.)*?\1/g)].length;
   });
-  return { order, steps };
+  return { order: entries.map((e) => e.id), dirs: entries.map((e) => e.dir), steps };
+}
+
+function readStructure(presDir) {
+  return readChapterStructure(presDir);
 }
 
 function readExistingCues(presDir) {
@@ -151,6 +180,11 @@ function readExistingCues(presDir) {
  */
 export async function choreographCameras(presDir, previewUrl, { density = "dense", avatarEnabled = true } = {}) {
   const { order, steps } = readStructure(presDir);
+  // 0 章 = 结构读取失败，必须大声失败（job-32 实证：静默空转 → 全片零镜头，
+  // 只有 effectScore 记账里能看出来）。新形状出现时这里的报错就是修复线索。
+  if (!order.length || steps.every((n) => n === 0)) {
+    throw new Error("章节结构读取失败（registry/chapters.ts 形状不识别或 narrations 缺失）——拒绝 0 章空转，需检查 readChapterStructure 的形状兼容");
+  }
   // AI 意图快照（2026-07-22 根治重排破坏性幂等）：编排器输出会覆写 registry，
   // 直接回读会把自己上一轮的机器 cue 当"AI 声明"逐轮固化（job-31 实证：
   // 降级后的 spotlight 再也升不回 focus）。首轮把纯 AI 声明存快照，后续
