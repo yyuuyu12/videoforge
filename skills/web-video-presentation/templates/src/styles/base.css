@@ -413,3 +413,15 @@ body {
   from { opacity: 0; }
   to   { opacity: 1; }
 }
+
+/* 边缘安全渐变（2026-07-22）：镜头推拉时滑到边缘的内容淡出到底色，
+   不与字幕/数字人硬压。scene(2) 之上、字幕(4)/数字人(5+) 之下。 */
+.edge-fade { position: absolute; z-index: 3; pointer-events: none; }
+.edge-fade--bottom {
+  left: 0; right: 0; bottom: 0; height: 150px;
+  background: linear-gradient(to bottom, transparent, color-mix(in srgb, var(--shell, #0a0a0a) 88%, transparent));
+}
+.edge-fade--end {
+  top: 0; bottom: 0; right: 0; width: calc(var(--stage-pad-x-end, 160px) * 0.72);
+  background: linear-gradient(to right, transparent, color-mix(in srgb, var(--shell, #0a0a0a) 82%, transparent));
+}

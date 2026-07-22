@@ -126,6 +126,11 @@ export default function App() {
             </CameraLayer>
           </EffectsProvider>
         </div>
+        {/* 边缘安全渐变（2026-07-22 用户提议）：镜头推拉时内容会滑过字幕区/
+            数字人区，边缘本来就是非重点——底部与数字人侧各铺一条到底色的
+            渐变，推过来的内容淡出而不是硬压。在镜头层之上、字幕/数字人之下。 */}
+        <div className="edge-fade edge-fade--bottom" aria-hidden="true" />
+        {AVATAR_CONFIG.enabled && <div className="edge-fade edge-fade--end" aria-hidden="true" />}
         {/* 钩子分屏期隐藏底部字幕：右栏大字本身就是字幕 */}
         {hostMode !== "split" && <Subtitle
           chapterId={ch.id}

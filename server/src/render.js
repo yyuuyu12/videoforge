@@ -226,6 +226,23 @@ async function inspectVisualQuality(page) {
       const lines = lineHeight > 0 ? Math.ceil(b.r.h / lineHeight) : 1;
       return lines > 2;
     }).map((b) => ({ text: b.text, lines: Math.ceil(b.r.h / Number.parseFloat(getComputedStyle(b.el).lineHeight)) }));
+    // 字号量级记账（2026-07-22 用户抓出"6万"排成正文小字）：数字主角屏的
+    // 数字必须 hero 级——先记账校准（largestFontPx/numericMaxFontPx），
+    // 稳定后可对"纯数字屏 <72px"转执法。
+    let largestFontPx = 0;
+    let numericMaxFontPx = 0;
+    for (const el of document.querySelectorAll(".camera-breath *")) {
+      if (!(el instanceof HTMLElement) || el.children.length > 2) continue;
+      const txt = (el.textContent || "").trim();
+      if (!txt || txt.length > 20) continue;
+      const fr = el.getBoundingClientRect();
+      if (fr.width < 10 || fr.height < 10) continue;
+      const fcs = getComputedStyle(el);
+      if (fcs.visibility === "hidden" || fcs.display === "none") continue;
+      const fs = Number.parseFloat(fcs.fontSize) || 0;
+      if (fs > largestFontPx) largestFontPx = fs;
+      if (/\d/.test(txt) && txt.length <= 10 && fs > numericMaxFontPx) numericMaxFontPx = fs;
+    }
     const score = Math.max(0, Math.min(100,
       100
       - collisions * 12
@@ -243,6 +260,7 @@ async function inspectVisualQuality(page) {
       subtitleLines, subtitleTooLong, subtitleMultiline, longestContentText,
       longContentBlocks, headingViolations, textOnMedia, containerOverflow,
       containerOverflowDetails, wrapViolations, composition, sampledElements: boxes.length,
+      typeScale: { largestFontPx: Math.round(largestFontPx), numericMaxFontPx: Math.round(numericMaxFontPx) },
     };
   });
 }

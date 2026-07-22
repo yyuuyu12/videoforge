@@ -467,6 +467,36 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
     }
   }
 
+  // 推拉节奏纪律（2026-07-22 用户拍板：'不要每一页都推拉，隔两页推一次，
+  // 中间穿插其他效果'）：zoom 类镜头（focus/magnify）全局间隔 ≥3 步——
+  // 页页推拉=晕船不是灵动。间隔不足的后来者降档为 spotlight（保留目标与
+  // whip 入场，仍是强效果只是不动镜头）；数字特写(magnify)优先保留，
+  // 宁可降它前面的 heading focus。
+  {
+    const ZOOM_GAP = 3;
+    let lastZoomG = -ZOOM_GAP;
+    for (let g = 0; g < flatRef.length; g++) {
+      const { ci, si } = flatRef[g];
+      const arr = cues[order[ci]];
+      const cue = arr[si];
+      if (!cue || (cue.effect !== "focus" && cue.effect !== "magnify")) continue;
+      if (g - lastZoomG >= ZOOM_GAP) { lastZoomG = g; continue; }
+      // 与上一个 zoom 距离不足：magnify（数字特写，最贵的镜头语言）回头把
+      // 上一个 zoom 降档让位；heading/普通 focus 自己降档
+      if (cue.effect === "magnify" && lastZoomG >= 0) {
+        const prev = flatRef[lastZoomG];
+        const prevArr = cues[order[prev.ci]];
+        const prevCue = prevArr[prev.si];
+        if (prevCue && prevCue.effect === "focus") {
+          prevArr[prev.si] = { effect: "spotlight", target: prevCue.target, ...(prevCue.enter ? { enter: prevCue.enter } : {}) };
+          lastZoomG = g;
+          continue;
+        }
+      }
+      arr[si] = { effect: "spotlight", target: cue.target, ...(cue.enter ? { enter: cue.enter } : {}) };
+    }
+  }
+
   // 数字人时刻布点（AI 未布时机器兜底）
   if (avatarEnabled && order.length) {
     const hasHostFull = Object.values(cues).some((arr) => arr.some((c) => c?.effect === "host-full" || c?.effect === "host-split"));

@@ -117,9 +117,12 @@ async function advance(jobId) {
         const ws = getJob(jobId).workspace;
         // 逐屏审计的进度回调：把"正在校验第 X 章第 Y 屏"写进 sidecar
         const auditProgress = (phase) => ({ chapter, step }) => writeQualityProgress(ws, { phase, chapter, step });
+        const genProgress = (pct, msg) => logEvent(jobId, "chapter_gen", `progress|${pct}|${msg}`);
         try {
           writeQualityProgress(ws, { phase: "lint", round: 0, maxRound: 2, chapter: null, step: null, score: null, targetScore: null, checkedSteps: null, startedAt: new Date().toISOString(), roundStartedAt: new Date().toISOString() });
+          genProgress(89, "画面工程构建（后处理 1/5）");
           await buildPresentation(getJob(jobId));
+          genProgress(90, "静态规则检查（后处理 2/5）");
           // 静态 linter 执法模式（2026-07-16 转正：7 个满分作品实测零误伤）：
           // error 级违规直接判章节生成失败并给出毫秒级归因证据；warn 只记账。
           try {
@@ -155,6 +158,7 @@ async function advance(jobId) {
             // 确定性镜头编排（2026-07-17：AI 自动 = 手排质量的保证）——
             // 走查真实 DOM 按信号编排，AI 有意声明的镜头保留、机器补齐到下限
             try {
+              genProgress(91, "镜头编排：走查画面布点（后处理 3/5，约 1-3 分钟）");
               const plan = await choreographCameras(
                 presDir(),
                 `http://127.0.0.1:${config.port}/preview/${jobId}/`,
@@ -187,6 +191,7 @@ async function advance(jobId) {
             logEvent(jobId, "quality", `静态 linter 未能运行：${lintError.message}`, "error");
           }
           writeQualityProgress(ws, { phase: "audit", round: 0, maxRound: 3, targetScore: 90, chapter: null, step: null, roundStartedAt: new Date().toISOString() });
+          genProgress(93, "逐屏画面审计（后处理 4/5，每屏截图检查）");
           let audit = await inspectPreviewQuality(getJob(jobId), { onProgress: auditProgress("audit") });
           if (!audit.pass) audit = await auditPreviewQuality(getJob(jobId), { onProgress: auditProgress("audit") });
           recordQualityEntry({ kind: "audit", jobId, phase: "first", score: audit.score, pass: audit.pass, checkedSteps: audit.checkedSteps, defects: defectSummary(audit) });
@@ -194,6 +199,7 @@ async function advance(jobId) {
             throwIfCancelled(jobId);
             const worst = audit.worstStep;
             writeQualityProgress(ws, { phase: "repair", round: attempt, maxRound: 3, score: audit.score, targetScore: 90, chapter: worst ? worst.chapter + 1 : null, step: worst ? worst.step + 1 : null, checkedSteps: audit.checkedSteps, roundStartedAt: new Date().toISOString() });
+            genProgress(93 + attempt, `画面自动修复 第 ${attempt}/3 轮（模型修改中，约 1-3 分钟）`);
             logEvent(jobId, "quality", `自动画面验收 ${audit.score}/100，开始第 ${attempt}/3 次修复${worst ? `（第 ${worst.chapter + 1} 章第 ${worst.step + 1} 屏）` : ""}`, "error");
             const repaired = await repairChapterQuality(getJob(jobId), audit);
             if (!repaired.ok) throw new Error(`第 ${attempt} 次自动修复失败：${repaired.note || "模型未完成修复"}`);
@@ -215,6 +221,7 @@ async function advance(jobId) {
             try {
               throwIfCancelled(jobId);
               writeQualityProgress(ws, { phase: "effect", round: 0, maxRound: 1, score: null, targetScore: (config.effectScore.minScore ?? 72), chapter: null, step: null, roundStartedAt: new Date().toISOString() });
+              genProgress(98, "效果打分：博主质感维（后处理 5/5）");
               const es = await runEffectScore(jobId, { port: config.port });
               if (!es.ok) {
                 logEvent(jobId, "quality", `效果打分未能运行：${es.note}`, "warning");
