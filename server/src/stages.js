@@ -843,13 +843,26 @@ export async function repairChapterQuality(job, audit) {
     "quality-audit",
     step.screenshot,
   )).filter(existsSync);
+  // 章节定位（2026-07-22 根治 job-31 三轮修复全改错文件）：审计只有章节序号，
+  // 模型靠猜映射目录必然跑偏——从运行时真源 registry/chapters.ts 的数组字面量
+  // 顺序取 id（读实际产物，不猜 import 形状），把序号翻译成目录名喂给模型。
+  let chapterIds = [];
+  try {
+    const registrySrc = readFileSync(join(job.workspace, "presentation", "src", "registry", "chapters.ts"), "utf8");
+    chapterIds = [...registrySrc.matchAll(/\bid\s*:\s*["']([^"']+)["']/g)].map((m) => m[1]);
+  } catch {}
   const findings = failed.map((step) => ({
     chapter: step.chapter + 1,
+    chapterDir: chapterIds[step.chapter] ? `src/chapters/${chapterIds[step.chapter]}/` : undefined,
     step: step.step + 1,
     score: step.score,
     screenshot: step.screenshot,
     collisions: step.visual?.collisions || 0,
+    // 机器可读靶子：谁压谁（选择器+文字摘录）/哪个叶子撑破哪个容器
+    collisionPairs: step.visual?.collisionPairs || undefined,
+    containerOverflow: step.visual?.containerOverflowDetails || undefined,
     overflow: step.overflowCount || 0,
+    offenders: (step.offenders || []).slice(0, 5).map((o) => o.selector),
     subtitleChars: step.visual?.subtitleTextLength || 0,
     subtitleLines: step.visual?.subtitleLines || 0,
     longContentBlocks: step.visual?.longContentBlocks || 0,
@@ -859,6 +872,7 @@ export async function repairChapterQuality(job, audit) {
     `必须重新阅读 ${skill}/references/CHAPTER-CRAFT.md，并把它作为硬性验收标准。`,
     "已附上最低分画面的真实 1920×1080 截图。先逐张观察重叠、拥挤、字幕遮挡、文字密度和安全区问题，再定位对应章节代码。",
     `失败明细：${JSON.stringify(findings)}`,
+    "定位纪律：明细里的 chapterDir 就是缺陷所在目录，collisionPairs/containerOverflow 给出了压叠双方的选择器与文字摘录——先按类名/文字 grep 到具体行再改。分数最低的那一屏必须优先修复；不在明细里的章节不要动。",
     "硬性要求：每屏只保留一个主结论；正文说明最多两条且每条一行；单块中文正文超过 28 字必须删减或拆 step，禁止缩小字号硬塞。",
     "字幕必须与对应 narration/音频 step 一一对应，每次只显示一行短句，中文目标 8 字、硬上限 10 字，下一句出现时上一句消失。",
     "字幕安全带和数字人安全区内不得放正文、图表、关键数字或高对比装饰。任何非设计性重叠都必须消除。",

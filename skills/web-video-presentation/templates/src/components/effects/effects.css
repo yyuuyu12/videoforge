@@ -22,6 +22,19 @@
   font-style: normal; /* 斜体展示字体缺 ¥/％ 等字形时回退正体，正斜混排各占其位防互压 */
   margin-inline: 0.06em;
 }
+/* 内联效果件位置防火墙（2026-07-22，job-31 实证）：章节 CSS 的后代选择器
+   （如 .lo-orbit span）会意外命中效果件内部结构，position/top 一旦被劫持
+   必然破版且模型极难自查（看起来完全是合法 CSS）。位置类属性在此锁死；
+   章节若需移动效果件，包一层自己的定位容器。 */
+.fx-wordmark,
+.fx-counter,
+.fx-counter__affix,
+.fx-slam,
+.fx-shine,
+.fx-annotate {
+  position: relative !important;
+  inset: auto !important;
+}
 .fx-counter--settled {
   animation: fx-counter-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1);
 }

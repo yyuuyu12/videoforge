@@ -163,6 +163,10 @@ async function inspectVisualQuality(page) {
       // 纯符号装饰（箭头/斜杠等连接件，无字母数字汉字）骑在容器边界上是
       // 图示设计，不是"字撑破容器"（2026-07-22 校准：I«→» 误报）
       if (!/[\p{L}\p{N}]/u.test(b.text)) continue;
+      // 自带底板的芯片（叶子自己有背景/边框）骑容器边界是分层图示设计
+      // （如轨道环上的节点芯片），本规则只抓"裸文字破版"（job-31 校准）
+      const leafStyle = getComputedStyle(b.el);
+      if (leafStyle.backgroundColor !== "rgba(0, 0, 0, 0)" || (Number.parseFloat(leafStyle.borderTopWidth) || 0) > 0) continue;
       let node = b.el.parentElement;
       for (let depth = 0; node && depth < 4; depth += 1, node = node.parentElement) {
         const cs = getComputedStyle(node);

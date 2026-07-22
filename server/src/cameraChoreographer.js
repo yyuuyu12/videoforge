@@ -58,6 +58,19 @@ function extractSignalsInPage() {
     return cs.visibility !== "hidden" && cs.display !== "none" && Number(cs.opacity) > 0.05;
   };
 
+  // 信号统一携带无变换态矩形（2026-07-22）：编排落 focus 前先算可行倍率，
+  // 否则宽目标声明 1.45 会被切字守卫砍到 ~1.1 = effectScore 弱缩放病（job-31 实证）。
+  // 坐标系铁律：必须换算到舞台本地像素（÷letterbox 缩放），守卫用的是
+  // 1920×1080 舞台坐标——直接用屏幕像素在 720p 走查下会把宽目标算窄一半。
+  const camLayer = document.querySelector(".camera-layer");
+  const layerScale = camLayer
+    ? (camLayer.getBoundingClientRect().width / camLayer.offsetWidth || 1)
+    : 1;
+  const sig = (el, extra = {}) => {
+    const r = el.getBoundingClientRect();
+    return { path: pathOf(el), w: Math.round(r.width / layerScale), h: Math.round(r.height / layerScale), ...extra };
+  };
+
   // 信号一：大数字块（含数字、字号大、文本短）
   let numeric = null;
   for (const el of root.querySelectorAll("*")) {
@@ -68,7 +81,7 @@ function extractSignalsInPage() {
     if (fontSize < 40) continue;
     const r = el.getBoundingClientRect();
     const score = fontSize * Math.sqrt(r.width * r.height);
-    if (!numeric || score > numeric.score) numeric = { score, path: pathOf(el) };
+    if (!numeric || score > numeric.score) numeric = sig(el, { score });
   }
 
   // 信号二：列表簇（同类子元素 ≥3 的容器）
@@ -79,7 +92,7 @@ function extractSignalsInPage() {
     if (new Set(tags).size !== 1) continue;
     const r = el.getBoundingClientRect();
     const score = r.width * r.height;
-    if (!list || score > list.score) list = { score, path: pathOf(el) };
+    if (!list || score > list.score) list = sig(el, { score });
   }
 
   // 信号三：主内容块（h1 的最近块容器，pan 呼吸目标）
@@ -89,16 +102,16 @@ function extractSignalsInPage() {
   const h1 = [...root.querySelectorAll("h1")].find(visible);
   if (h1) {
     const container = h1.closest("div, main, section") || h1;
-    copy = { path: pathOf(container === root ? h1 : container) };
+    copy = sig(container === root ? h1 : container);
     const hr = h1.getBoundingClientRect();
-    if (hr.width >= 40 && hr.height >= 30) heading = { path: pathOf(h1) };
+    if (hr.width >= 40 && hr.height >= 30) heading = sig(h1);
   }
 
   return {
-    numeric: numeric?.path ?? null,
-    list: list?.path ?? null,
-    copy: copy?.path ?? null,
-    heading: heading?.path ?? null,
+    numeric,
+    list,
+    copy,
+    heading,
     // 章节卡在场（效果 v2b）：章首仪式步——甩切边界的判定信号
     chapterCard: !!root.querySelector(".fx-chaptercard"),
   };
@@ -138,23 +151,63 @@ function readExistingCues(presDir) {
  */
 export async function choreographCameras(presDir, previewUrl, { density = "dense", avatarEnabled = true } = {}) {
   const { order, steps } = readStructure(presDir);
-  const existing = readExistingCues(presDir);
+  // AI 意图快照（2026-07-22 根治重排破坏性幂等）：编排器输出会覆写 registry，
+  // 直接回读会把自己上一轮的机器 cue 当"AI 声明"逐轮固化（job-31 实证：
+  // 降级后的 spotlight 再也升不回 focus）。首轮把纯 AI 声明存快照，后续
+  // 各轮一律以快照为意图真相源，重排从此幂等可重入。
+  const aiSnapshotPath = join(presDir, "src", "registry", "cameraCues.ai.json");
+  let existing;
+  if (existsSync(aiSnapshotPath)) {
+    existing = JSON.parse(readFileSync(aiSnapshotPath, "utf8"));
+  } else {
+    existing = readExistingCues(presDir);
+    writeFileSync(aiSnapshotPath, `${JSON.stringify(existing, null, 1)}\n`);
+  }
   const cap = DENSITY_CAP[density] ?? 4;
   const floor = DENSITY_TARGET[density] ?? 2;
 
+  const VIEW_W = 1280;
+  const VIEW_H = 720; // 走查视口（信号矩形的坐标系，可行倍率按它换算）
   const browser = await launchBrowser();
   const signals = []; // [chapterIdx][stepIdx] -> {numeric,list,copy}
+  const aiTargetRects = []; // [ci][si] -> {w,h}｜AI 声明 focus 目标的实测矩形
   try {
-    const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
+    const page = await browser.newPage({ viewport: { width: VIEW_W, height: VIEW_H } });
     await page.goto(previewUrl, { waitUntil: "load", timeout: 60000 });
+    // 素颜态测量（2026-07-22，与审计同源纪律）：重排时页面带着上一轮镜头
+    // 在实时变换，信号/目标矩形会被放大态污染 → 可行倍率全算歪。中和之。
+    await page.addStyleTag({ content: ".camera-layer,.camera-punch,.camera-breath{transform:none!important;animation:none!important;transition:none!important}" });
     await page.evaluate(() => document.fonts.ready);
     await page.waitForTimeout(400);
-    for (let ci = 0; ci < order.length; ci++) signals.push(new Array(steps[ci]).fill(null));
+    for (let ci = 0; ci < order.length; ci++) {
+      signals.push(new Array(steps[ci]).fill(null));
+      aiTargetRects.push(new Array(steps[ci]).fill(null));
+    }
     let ci = 0, si = 0;
     const total = steps.reduce((a, b) => a + b, 0);
     for (let g = 0; g < total; g++) {
-      await page.waitForTimeout(g === 0 ? 600 : 240); // 等入场动画大致落定
+      await page.waitForTimeout(g === 0 ? 600 : 240);
+      // 入场动画结算到终态再测量（与审计同源：中间态矩形不可信）
+      await page.evaluate(() => {
+        document.getAnimations?.().forEach((animation) => {
+          try { animation.finish(); } catch { animation.cancel(); }
+        });
+      });
       signals[ci][si] = await page.evaluate(extractSignalsInPage);
+      // AI 声明的 focus 目标同样量矩形——意图保留但机制受可行倍率约束
+      const aiCue = existing[order[ci]]?.[si];
+      if ((aiCue?.effect === "focus" || aiCue?.effect === "magnify") && aiCue.target) {
+        aiTargetRects[ci][si] = await page.evaluate((sel) => {
+          let el = null;
+          try { el = document.querySelector(sel); } catch {}
+          if (!el) return null;
+          // 舞台本地坐标（与守卫同坐标系），不是屏幕像素
+          const layer = document.querySelector(".camera-layer");
+          const s0 = layer ? (layer.getBoundingClientRect().width / layer.offsetWidth || 1) : 1;
+          const r = el.getBoundingClientRect();
+          return r.width > 0 && r.height > 0 ? { w: Math.round(r.width / s0), h: Math.round(r.height / s0) } : null;
+        }, aiCue.target);
+      }
       si += 1;
       if (si >= steps[ci]) { ci += 1; si = 0; }
       if (g < total - 1) await page.keyboard.press("ArrowRight");
@@ -163,15 +216,68 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
     await browser.close().catch(() => {});
   }
 
+  if (process.env.VF_CHOREO_DEBUG) {
+    writeFileSync(process.env.VF_CHOREO_DEBUG, JSON.stringify({ order, steps, signals, aiTargetRects, existing }, null, 1));
+  }
+
   // —— 规则编排（与手排同一套） ——
+  // 可行倍率预检（2026-07-22）：目标推近后须整体留在取景安全区内（与
+  // CameraLayer 切字守卫同源约束）。focus 推不到词表下限 1.4 就改 spotlight
+  // ——同为强效果但零缩放，不产生"声明 1.45 实际 1.1"的弱缩放账。
+  // 与 CameraLayer 守卫同源公式（舞台 1920×1080 坐标 + MARGIN 12×2），
+  // 再打 0.95 位置折扣（守卫还有贴边降档，预检位置盲）
+  const feasibleZoom = (s) => (s?.w > 0 && s?.h > 0
+    ? Math.min(1920 / (s.w + 24), 1080 / (s.h + 24)) * 0.95
+    : Infinity);
+  const focusOr = (s, wantZoom) => {
+    const fz = Math.min(wantZoom, feasibleZoom(s));
+    return fz >= 1.4
+      ? { effect: "focus", target: s.path, zoom: Math.round(fz * 100) / 100 }
+      : { effect: "spotlight", target: s.path };
+  };
+  // 宽目标的博主式替代：容器推不动就推它里面的窄主角（数字 > 标题），
+  // 全宽也没有窄主角才退聚光——保住真实的 zoom punch，不让画面全是压暗。
+  const narrowAlternative = (ci, si) => {
+    const s = signals[ci]?.[si];
+    for (const cand of [s?.numeric, s?.heading]) {
+      if (cand && feasibleZoom(cand) >= 1.4) return cand;
+    }
+    return null;
+  };
   let magFlip = false;
   const cues = {};
   order.forEach((id, ci) => {
     const stepCount = steps[ci];
     const arr = new Array(stepCount).fill(null);
     const aiArr = existing[id] ?? [];
-    // AI 有意声明的先落位（视为设计意图）
-    for (let si = 0; si < stepCount; si++) if (aiArr[si]) arr[si] = aiArr[si];
+    // AI 有意声明的先落位（视为设计意图）。focus 的强调意图保留，但机制过
+    // 可行倍率预检：宽目标推不到 1.4 转 spotlight（否则守卫砍成弱缩放）
+    for (let si = 0; si < stepCount; si++) {
+      const c = aiArr[si];
+      if (!c) continue;
+      const rect = aiTargetRects[ci]?.[si];
+      if (c.effect === "focus" && c.target && rect) {
+        const fz = Math.min(c.zoom ?? 2, feasibleZoom(rect));
+        if (fz >= 1.4) {
+          arr[si] = { ...c, zoom: Math.round(fz * 100) / 100 };
+        } else {
+          // 容器太宽推不动：换推里面的窄主角（数字/标题），保住 punch
+          const alt = narrowAlternative(ci, si);
+          arr[si] = alt
+            ? { ...focusOr(alt, c.zoom ?? 2), ...(c.enter ? { enter: c.enter } : {}) }
+            : { effect: "spotlight", target: c.target, ...(c.enter ? { enter: c.enter } : {}) };
+        }
+      } else if (c.effect === "magnify" && c.target && rect && Math.min(c.zoom ?? 2.8, feasibleZoom(rect)) < 2.0) {
+        // magnify 推不到 2.0 就失去"放大镜"意义（守卫会砍成 1.1 级弱缩放）：
+        // 换窄主角 focus 或退聚光，同样是意图保留、机制受约束
+        const alt = narrowAlternative(ci, si);
+        arr[si] = alt
+          ? { ...focusOr(alt, 2.2), ...(c.enter ? { enter: c.enter } : {}) }
+          : { effect: "spotlight", target: c.target, ...(c.enter ? { enter: c.enter } : {}) };
+      } else {
+        arr[si] = c;
+      }
+    }
 
     const strongAt = new Set();
     arr.forEach((c, si) => { if (c && (c.effect === "magnify" || (c.effect === "focus" && (c.zoom ?? 2) >= 2))) strongAt.add(si); });
@@ -183,37 +289,58 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
       if (arr[si] || !signals[ci][si]?.numeric || !canStrong(si)) continue;
       if (ci === 0 && si === 0 && avatarEnabled) continue; // 留给 host-full
       magFlip = !magFlip;
-      arr[si] = magFlip
-        ? { effect: "magnify", target: signals[ci][si].numeric, zoom: 2.8 }
-        : { effect: "focus", target: signals[ci][si].numeric, zoom: 2.2 };
+      // magnify 是强推近+镜片圈，推不到 2.0 就没有"放大镜"意义——目标太宽时走 focus/spotlight 路线
+      arr[si] = magFlip && feasibleZoom(signals[ci][si].numeric) >= 2.0
+        ? { effect: "magnify", target: signals[ci][si].numeric.path, zoom: 2.8 }
+        : focusOr(signals[ci][si].numeric, 2.2);
       strongAt.add(si); moves += 1;
       break;
     }
     // 列表聚光（每章一处）
     for (let si = 0; si < stepCount && moves < cap; si++) {
       if (arr[si] || !signals[ci][si]?.list) continue;
-      arr[si] = { effect: "spotlight", target: signals[ci][si].list };
+      arr[si] = { effect: "spotlight", target: signals[ci][si].list.path };
       moves += 1;
       break;
     }
-    // 每章保底一个强特写（2026-07-18）：本章还没有 magnify/focus/spotlight
-    // 且不是纯 host 开场章时，focus 主标题 2.0×——根治"全是软 pan 没 punch"
-    //（job-26 实测：无大数字的章全退化成 1.25 轻推，观感平）。
-    const hasStrong = () => arr.some((c) => c && (c.effect === "magnify" || c.effect === "focus" || c.effect === "spotlight"));
+    // 每章保底一个强特写（2026-07-18；2026-07-22 收紧）：保底只认真 zoom
+    // punch（magnify/focus）——spotlight 是压暗不是推近，算进保底会让整章
+    // 只剩聚光没有镜头运动（job-31 实证 35 spotlight/1 focus 观感全平）。
+    const hasStrong = () => arr.some((c) => c && (c.effect === "magnify" || c.effect === "focus"));
     const hasOpeningHost = arr.some((c) => c && (c.effect === "host-full" || c.effect === "host-split"));
-    if (!hasStrong() && !hasOpeningHost && moves < cap) {
-      for (let si = 0; si < stepCount; si++) {
-        if (arr[si] || !signals[ci][si]?.heading || !canStrong(si)) continue;
-        if (ci === 0 && si === 0 && avatarEnabled) continue;
-        arr[si] = { effect: "focus", target: signals[ci][si].heading, zoom: 2.0 };
-        strongAt.add(si); moves += 1;
-        break;
+    if (!hasStrong() && !hasOpeningHost) {
+      let placed = false;
+      if (moves < cap) {
+        for (let si = 0; si < stepCount; si++) {
+          if (arr[si] || !canStrong(si)) continue;
+          if (ci === 0 && si === 0 && avatarEnabled) continue;
+          const tgt = narrowAlternative(ci, si) || signals[ci][si]?.heading;
+          if (!tgt) continue;
+          const cue = focusOr(tgt, 2.0);
+          if (cue.effect !== "focus") continue; // 保底必须是真 zoom punch
+          arr[si] = cue; strongAt.add(si); moves += 1; placed = true;
+          break;
+        }
+      }
+      if (!placed) {
+        // 预算已满或没有可推的空步：把一个已有 spotlight 原地升级成窄目标
+        // focus——不加预算、同强度档位，只是把"压暗"换成"推近"
+        for (let si = 0; si < stepCount; si++) {
+          if (!arr[si] || arr[si].effect !== "spotlight" || !canStrong(si)) continue;
+          const alt = narrowAlternative(ci, si);
+          if (!alt) continue;
+          const cue = focusOr(alt, 2.0);
+          if (cue.effect !== "focus") continue;
+          arr[si] = { ...cue, ...(arr[si].enter ? { enter: arr[si].enter } : {}) };
+          strongAt.add(si);
+          break;
+        }
       }
     }
     // 呼吸 pan 补到下限
     for (let si = 1; si < stepCount - 1 && moves < Math.max(floor, 2) && moves < cap; si++) {
       if (arr[si] || !signals[ci][si]?.copy || !canStrong(si)) continue;
-      arr[si] = { effect: "pan", target: signals[ci][si].copy, zoom: 1.25 };
+      arr[si] = { effect: "pan", target: signals[ci][si].copy.path, zoom: 1.25 };
       moves += 1;
     }
     cues[id] = arr;
@@ -235,14 +362,22 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
       const neighborStrong = (arr[si - 1] && STRONG_EFF.has(arr[si - 1].effect)) || (arr[si + 1] && STRONG_EFF.has(arr[si + 1].effect));
       if (!neighborStrong) {
         if (arr[si] && arr[si].effect === "pan" && arr[si].target) {
-          // 已有软 pan：直接升级成 focus（零成本，同时消游程+加 punch）
-          arr[si] = { effect: "focus", target: arr[si].target, zoom: 2.0 };
+          // 已有软 pan：升级成强效果消游程。pan 目标多为宽内容块，先按信号
+          // 矩形做可行倍率预检，推不动就 spotlight（同为强效果零弱缩放账）
+          const alt = narrowAlternative(ci, si);
+          const sigMatch = [signals[ci][si]?.heading, signals[ci][si]?.copy, signals[ci][si]?.numeric]
+            .find((s) => s?.path === arr[si].target);
+          arr[si] = alt
+            ? focusOr(alt, 2.0)
+            : sigMatch
+              ? focusOr(sigMatch, 2.0)
+              : { effect: "spotlight", target: arr[si].target };
           flatRun = 0;
         } else if (!arr[si]) {
-          // 空步：按信号注入 focus（heading/copy）
+          // 空步：按信号注入强效果（窄主角优先，带可行倍率预检）
           const sig = signals[ci][si];
-          const tgt = sig?.heading || sig?.copy;
-          if (tgt) { arr[si] = { effect: "focus", target: tgt, zoom: 2.0 }; flatRun = 0; }
+          const tgt = narrowAlternative(ci, si) || sig?.heading || sig?.copy;
+          if (tgt) { arr[si] = focusOr(tgt, 2.0); flatRun = 0; }
         }
       }
     }

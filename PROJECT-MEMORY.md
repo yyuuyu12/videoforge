@@ -1,5 +1,32 @@
 # VideoForge 项目记忆
 
+## 2026-07-22 下午批次：job-31 泛化考卷（2374 字教程文，11 章 64 步）暴露并根治五缺陷
+
+用户指令"换一篇 1000 字+文案重走检测流程"。job-31（art-118 豆包学习技巧）最终：结构 90 过门、
+effectScore 98/100（对照 job-30：100/95），全程只修工作台不手改产物。逐层暴露的缺陷与根治：
+
+- **修复靶向缺陷（最重）**：repairChapterQuality 的证据只有"第 N 章第 M 屏"序号+截图，模型三轮
+  修复全改错文件（learning-overload 的缺陷屏一次没被碰）。根治：从 registry/chapters.ts 数组字面量
+  顺序把序号翻译成 `chapterDir`，连同 collisionPairs/containerOverflowDetails 机器可读靶子一起进
+  findings，prompt 加定位纪律"chapterDir 就是缺陷目录，最低分屏必须优先修"。
+- **效果件位置防火墙**：章节 CSS 后代选择器（`.lo-orbit span`）意外命中 WordMark 内部 span，把它
+  劫持成 absolute 飞去压别的芯片——模型六轮修不掉（代码看起来完全合法）。根治在 effects.css：
+  内联效果件（fx-wordmark/counter/affix/slam/shine/annotate）`position:relative!important;
+  inset:auto!important` 锁死。防火墙一到位该缺陷立消（88→90 过门）。
+- **编排器可行倍率预检 + 坐标系铁律**：focus/magnify 落位前先算目标可行倍率（与 CameraLayer 守卫
+  同源公式），推不到 1.4/2.0 就换"窄主角"（数字>标题）或退 spotlight——根治"声明 1.45 实际被守卫
+  砍到 1.05"的弱缩放病（job-31 一度 22 处）。**坐标系铁律：一切预检测量必须换算到舞台本地像素
+  （÷letterbox scale0），屏幕像素在 720p 走查下会把目标算窄一半**。
+- **编排器破坏性幂等根治**：编排器输出覆写 registry 后，下轮把自己的机器 cue 当"AI 声明"回读，
+  降级结果逐轮固化（spotlight 再也升不回 focus）。根治：首轮把纯 AI 声明快照进
+  `src/registry/cameraCues.ai.json`，后续各轮一律以快照为意图真相源，重排幂等可重入。
+- **走查测量素颜纪律扩展到编排器**：重排时页面带着上轮镜头实时变换，信号矩形被放大态污染。
+  与审计同源：注入中和样式 + 每步 getAnimations().finish() 再测量。
+- **保底强特写收紧**：spotlight 不再算保底"强"（压暗≠推近）；预算满时把已有 spotlight 原地升级成
+  窄目标 focus。job-31 从 35 spotlight/1 focus 修到 29/11+每章有真 zoom punch。
+- 遗留已知项：job-31 镜头单一化 71%（快照修复前被固化的 spotlight 存量，−2 分；未来作品从纯 AI
+  快照起步不复现）；VF_CHOREO_DEBUG 环境变量可 dump 编排器信号用于排查。
+
 ## 2026-07-22 结构审计管辖权定稿 + v2b 端到端验证跑
 
 - **审计管辖权铁律：结构审计只对"落定素颜版式"负责，镜头运动质量归 effectScore**。job-30 验证跑
