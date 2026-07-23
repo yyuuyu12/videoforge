@@ -15,6 +15,9 @@ import { bgmAssetPath, bgmFilterChain, sfxFilterChains, sfxPlacements, sfxSummar
  * 帧时间戳（CDP epoch 秒）与音频事件（页面 Date.now()）同源同机，对齐误差在毫秒级。
  */
 
+// 逐屏审计及格线（2026-07-23 用户拍板：90 偏苛，88 起放行）
+export const PASS_SCORE = 88;
+
 function progress(jobId, pct, message) {
   logEvent(jobId, "render", `progress|${Math.max(0, Math.min(100, Math.round(pct)))}|${message}`);
 }
@@ -341,7 +344,7 @@ async function inspectCurrentPreviewStep(page) {
   const visual = await inspectVisualQuality(page);
   const structuralPenalty = audit.overflowCount * 8 + (audit.subtitleInFrame ? 0 : 15) + (audit.avatarInFrame ? 0 : 10) + Math.min(5, audit.emptyText) + (visual.subtitleSafe ? 0 : 25);
   const score = Math.max(0, Math.min(visual.score, 100 - structuralPenalty));
-  return { score, pass: score >= 90, ...audit, visual };
+  return { score, pass: score >= PASS_SCORE, ...audit, visual };
 }
 
 async function launchBrowser() {

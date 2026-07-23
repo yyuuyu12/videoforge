@@ -330,3 +330,7 @@ body { color:var(--vf-ink); background:linear-gradient(135deg,#f2eadc 0%,#fffdf8
 .vf-onboarding-avatar strong { font-size:12px; }
 @media(max-width:700px){.vf-onboarding{padding:16px 14px 38px}.vf-onboarding-brand{margin-bottom:24px}.vf-onboarding-steps li{gap:5px}.vf-onboarding-steps li:not(:last-child)::after{display:none}.vf-onboarding-steps span{padding-right:0;background:transparent;font-size:10px}.vf-onboarding-panel{min-height:0;padding:30px 20px 22px}.vf-onboarding-panel>h1{font-size:24px}.vf-onboarding-choices,.vf-onboarding-fields{grid-template-columns:1fr}.vf-onboarding-choices button{min-height:92px}.vf-onboarding-panel footer{align-items:stretch;flex-direction:column}.vf-onboarding-panel footer>div{width:100%;flex-wrap:wrap}.vf-onboarding-panel footer button{flex:1}.vf-onboarding-avatar{grid-template-columns:1fr;min-height:300px}.vf-onboarding-avatar aside{min-height:150px}.vf-onboarding-avatar>div{padding:24px}}
 @media(max-width:480px){.vf-update-banner{justify-content:flex-start;gap:8px;padding:7px 12px}.vf-update-banner span{min-width:0;flex:1}.vf-update-banner a{white-space:nowrap}.vf-update-banner button{flex:0 0 28px}}
+
+/* 章节列表分数徽标（2026-07-23）：达标灰绿、低于及格线亮红 */
+.vf-chapter-score { font-style: normal; color: var(--ok, #7fb069); }
+.vf-chapter-score.low { color: #ff5747; font-weight: 700; }

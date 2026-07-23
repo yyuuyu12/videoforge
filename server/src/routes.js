@@ -158,6 +158,16 @@ function chapterGeneration(job) {
       }
     }
   }
+  // 每章审计分（2026-07-23 用户需求"每个片段后面标分数"）：取该章各屏最低分
+  let chapterScores = new Map();
+  try {
+    const auditJson = JSON.parse(readFileSync(join(presentationRoot, "public", "quality-audit.json"), "utf8"));
+    for (const step of auditJson.steps || []) {
+      if (!Number.isFinite(step.score)) continue;
+      const prev = chapterScores.get(step.chapter);
+      if (prev == null || step.score < prev) chapterScores.set(step.chapter, step.score);
+    }
+  } catch {}
   const chapters = units
     .sort((a, b) => a.key.localeCompare(b.key, "zh-CN", { numeric: true }))
     .map((unit, index) => {
@@ -179,6 +189,7 @@ function chapterGeneration(job) {
         steps,
         ready,
         status: reviews.get(unit.key) || (ready ? "review" : "generating"),
+        auditScore: chapterScores.get(index) ?? null,
       };
     });
   const serviceEvent = db.prepare("SELECT message FROM job_events WHERE job_id = ? AND stage = 'chapter_gen' AND (message LIKE '%agent start%' OR message LIKE '%API agent start%') ORDER BY id DESC LIMIT 1").get(job.id);

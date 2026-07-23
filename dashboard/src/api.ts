@@ -64,6 +64,7 @@ export interface ChapterReview {
   index: number;
   title: string;
   steps: number;
+  auditScore?: number | null;
   ready: boolean;
   status: "queued" | "generating" | "review" | "approved";
 }

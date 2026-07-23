@@ -3,12 +3,12 @@ import { join } from "node:path";
 import { db, getJob, logEvent, updateJob } from "../db.js";
 import { nextStage, repairChapterQuality, repairFromEvidence, runStage, stageDef } from "../stages.js";
 import { buildPresentation } from "../preview.js";
-import { auditPreviewQuality, inspectPreviewQuality } from "../render.js";
+import { auditPreviewQuality, inspectPreviewQuality, PASS_SCORE } from "../render.js";
 import { defectSummary, recordQualityEntry } from "../qualityLedger.js";
 import { lintChapters, lintDefectSummary, lintEvidence } from "../chapterLint.js";
 import { cameraEvidence, validateCameraCues } from "../cameraCheck.js";
 import { choreographCameras } from "../cameraChoreographer.js";
-import { runEffectScore } from "../effectScoreRunner.js"; // skipEffectScore 由 routes 直接调 runner
+import { runEffectScore, skipEffectScore } from "../effectScoreRunner.js";
 import { config } from "../config.js";
 import { preflightWarnings } from "../preflight.js";
 import { clearCancel, isCancelling, requestCancel, throwIfCancelled } from "../cancellation.js";
@@ -190,13 +190,33 @@ async function advance(jobId) {
             if (/处违规/.test(lintError.message)) throw lintError;
             logEvent(jobId, "quality", `静态 linter 未能运行：${lintError.message}`, "error");
           }
-          writeQualityProgress(ws, { phase: "audit", round: 0, maxRound: 3, targetScore: 90, chapter: null, step: null, roundStartedAt: new Date().toISOString() });
-          genProgress(93, "逐屏画面审计（后处理 4/5，每屏截图检查）");
+          const readSkipFlag = () => {
+            try { return Boolean(JSON.parse(getJob(jobId).meta || "{}").skipEffectScore); } catch { return false; }
+          };
+          const clearSkipFlag = () => {
+            try {
+              const m = JSON.parse(getJob(jobId).meta || "{}");
+              delete m.skipEffectScore;
+              updateJob(jobId, { meta: JSON.stringify(m) });
+            } catch {}
+          };
+          // 并行走查（2026-07-23 用户拍板"时间减半"）：审计与效果打分各起
+          // 一个无头浏览器测同一份静态预览，互不依赖——常规无修复路径下
+          // 并行 = 总时长取两者较大者。修复轮一旦发生，早跑结果作废（测的
+          // 是修复前的树），修复通过后重跑一次，正确性优先。
+          let esEarly = null;
+          let repairsHappened = false;
+          if (config.effectScore?.enabled && !readSkipFlag()) {
+            esEarly = runEffectScore(jobId, { port: config.port });
+          }
+          writeQualityProgress(ws, { phase: "audit", round: 0, maxRound: 3, targetScore: PASS_SCORE, chapter: null, step: null, roundStartedAt: new Date().toISOString() });
+          genProgress(93, "逐屏画面审计（后处理 4/5，效果打分并行进行中）");
           let audit = await inspectPreviewQuality(getJob(jobId), { onProgress: auditProgress("audit") });
           if (!audit.pass) audit = await auditPreviewQuality(getJob(jobId), { onProgress: auditProgress("audit") });
           recordQualityEntry({ kind: "audit", jobId, phase: "first", score: audit.score, pass: audit.pass, checkedSteps: audit.checkedSteps, defects: defectSummary(audit) });
           for (let attempt = 1; !audit.pass && attempt <= 3; attempt += 1) {
             throwIfCancelled(jobId);
+            if (esEarly) { skipEffectScore(jobId); esEarly.catch(() => {}); esEarly = null; repairsHappened = true; }
             const worst = audit.worstStep;
             writeQualityProgress(ws, { phase: "repair", round: attempt, maxRound: 3, score: audit.score, targetScore: 90, chapter: worst ? worst.chapter + 1 : null, step: worst ? worst.step + 1 : null, checkedSteps: audit.checkedSteps, roundStartedAt: new Date().toISOString() });
             genProgress(93 + attempt, `画面自动修复 第 ${attempt}/3 轮（模型修改中，约 1-3 分钟）`);
@@ -210,23 +230,14 @@ async function advance(jobId) {
             recordQualityEntry({ kind: "repair-round", jobId, round: attempt, scoreBefore: before, scoreAfter: audit.score, pass: audit.pass, defects: defectSummary(audit) });
           }
           if (!audit.pass) {
+            if (esEarly) { skipEffectScore(jobId); esEarly.catch(() => {}); esEarly = null; }
             const worst = audit.worstStep;
-            throw new Error(`逐屏画面验收仅 ${audit.score}/100，低于 90 分${worst ? `；最低分为第 ${worst.chapter + 1} 章第 ${worst.step + 1} 屏` : ""}。已保留最低分截图，未进入人工验收。`);
+            throw new Error(`逐屏画面验收仅 ${audit.score}/100，低于 ${PASS_SCORE} 分${worst ? `；最低分为第 ${worst.chapter + 1} 章第 ${worst.step + 1} 屏` : ""}。已保留最低分截图，未进入人工验收。`);
           }
           logEvent(jobId, "quality", `结构质量门禁通过：${audit.score}/100，共检查 ${audit.checkedSteps} 屏${audit.screenshotsCaptured ? `，留存 ${audit.screenshotsCaptured} 张问题复核截图` : "，无需截图修复"}`);
           // 效果打分（博主质感维）：结构分只管"不出错"，本器管"够不够博主水准"
           // （fx密度/强效果占比/平淡游程/切字）。默认只记账校准；config.effectScore.gate
           // 开启且低于 minScore 时，触发一次效果向自动修复。
-          const readSkipFlag = () => {
-            try { return Boolean(JSON.parse(getJob(jobId).meta || "{}").skipEffectScore); } catch { return false; }
-          };
-          const clearSkipFlag = () => {
-            try {
-              const m = JSON.parse(getJob(jobId).meta || "{}");
-              delete m.skipEffectScore;
-              updateJob(jobId, { meta: JSON.stringify(m) });
-            } catch {}
-          };
           if (config.effectScore?.enabled && readSkipFlag()) {
             clearSkipFlag();
             logEvent(jobId, "quality", "效果打分：用户选择跳过（本轮不打分、不拦门禁）", "warning");
@@ -235,10 +246,12 @@ async function advance(jobId) {
               throwIfCancelled(jobId);
               writeQualityProgress(ws, { phase: "effect", round: 0, maxRound: 1, score: null, targetScore: (config.effectScore.minScore ?? 72), chapter: null, step: null, roundStartedAt: new Date().toISOString() });
               genProgress(98, "效果打分：博主质感维（后处理 5/5，可跳过）");
-              const es = await runEffectScore(jobId, {
-                port: config.port,
-                onProgress: (done, totalSteps) => genProgress(98, `效果打分 ${done}/${totalSteps} 屏（后处理 5/5，可跳过）`),
-              });
+              const es = await (esEarly && !repairsHappened
+                ? esEarly
+                : runEffectScore(jobId, {
+                    port: config.port,
+                    onProgress: (done, totalSteps) => genProgress(98, `效果打分 ${done}/${totalSteps} 屏（后处理 5/5，可跳过）`),
+                  }));
               if (readSkipFlag()) {
                 clearSkipFlag();
                 logEvent(jobId, "quality", "效果打分：用户中途跳过，结果不作数、直接进入验收", "warning");

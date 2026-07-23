@@ -1002,6 +1002,9 @@ export function Workbench({
                               : chapter.ready
                                 ? `待确认 · ${chapter.steps} 个画面步骤`
                                 : "正在生成"}
+                          {typeof chapter.auditScore === "number" && (
+                            <em className={`vf-chapter-score${chapter.auditScore < 88 ? " low" : ""}`}> · {chapter.auditScore}分</em>
+                          )}
                         </small>
                       </span>
                     </button>
