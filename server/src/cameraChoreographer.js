@@ -244,7 +244,7 @@ export async function choreographCameras(presDir, previewUrl, { density = "dense
     // 素颜态测量（2026-07-22，与审计同源纪律）：重排时页面带着上一轮镜头
     // 在实时变换，信号/目标矩形会被放大态污染 → 可行倍率全算歪。中和之。
     await page.addStyleTag({ content: ".camera-layer,.camera-punch,.camera-breath{transform:none!important;animation:none!important;transition:none!important}" });
-    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 5000))]));
     await page.waitForTimeout(400);
     // 运行时结构真相源：页面实际渲染的章节/步数（新模板 App 暴露），
     // 覆盖静态解析结果——源码形状再花也影响不到这里。

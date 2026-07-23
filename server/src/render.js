@@ -375,7 +375,7 @@ export async function captureJobCover(job, { requireAvatar = false } = {}) {
   try {
     const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
     await page.goto(previewUrl, { waitUntil: "networkidle", timeout: 60000 });
-    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 5000))]));
 
     if (requireAvatar) {
       await page.waitForFunction(() => {
@@ -413,7 +413,7 @@ async function inspectPreviewQualityInternal(job, { captureScreenshots, onProgre
     // 再测量，否则走查节奏一旦踩中镜头生效窗口，溢出/碰撞全是误报（job-27 得
     // 100 的真相是走查时镜头恰好未生效——本修复把同一口径变成确定性行为）。
     await page.addStyleTag({ content: ".camera-layer,.camera-punch,.camera-breath{transform:none!important;animation:none!important;transition:none!important}" });
-    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 5000))]));
     await page.waitForTimeout(350);
     const outDir = join(presDir, "public");
     mkdirSync(outDir, { recursive: true });
@@ -435,7 +435,24 @@ async function inspectPreviewQualityInternal(job, { captureScreenshots, onProgre
       const screenshot = captureScreenshots
         ? `${String(index + 1).padStart(3, "0")}-c${cursor.chapter + 1}-s${cursor.step + 1}.png`
         : null;
-      if (screenshot) await page.screenshot({ path: join(shotsDir, screenshot), type: "png" });
+      if (screenshot) {
+        // 截图是"取证照片"不是测量本体（几何 eval 已完成）——字体/负载抖动
+        // 拍不出照片绝不毙掉阶段（2026-07-23 用户实测：审核三轮间 fonts 卡
+        // 30s 超时判失败，画面本身完全正常）。三级降级：短超时 → CDP 直拍
+        // （绕过 Playwright 字体等待）→ 记警告跳过。
+        try {
+          await page.screenshot({ path: join(shotsDir, screenshot), type: "png", timeout: 8000 });
+        } catch {
+          try {
+            const cdpShot = await page.context().newCDPSession(page);
+            const { data } = await cdpShot.send("Page.captureScreenshot", { format: "png" });
+            writeFileSync(join(shotsDir, screenshot), Buffer.from(data, "base64"));
+            await cdpShot.detach().catch(() => {});
+          } catch (shotErr) {
+            logEvent(job.id, "quality", `第 ${index + 1} 屏取证截图未拍成（${String(shotErr.message || shotErr).slice(0, 80)}），测量数据完整、继续走查`, "warning");
+          }
+        }
+      }
       steps.push({ index, ...cursor, ...audit, ...(screenshot ? { screenshot } : {}) });
       await page.keyboard.press("ArrowRight");
       await page.waitForTimeout(120);
@@ -543,7 +560,7 @@ export async function renderJob(job) {
     });
     const page = await context.newPage();
     await page.goto(`${previewUrl}?auto=1`, { waitUntil: "load", timeout: 60000 });
-    await page.evaluate(() => document.fonts.ready);
+    await page.evaluate(() => Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 5000))]));
     await page.waitForTimeout(500); // 静态产物无需等待 Vite 按需编译，仅留首屏动画缓冲
 
     const frames = [];

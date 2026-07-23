@@ -47,7 +47,7 @@ const browser = await (async () => {
 })();
 const page = await browser.newPage({ viewport: { width: 1280, height: 720 } });
 await page.goto(previewUrl, { waitUntil: "load", timeout: 60000 });
-await page.evaluate(() => document.fonts.ready);
+await page.evaluate(() => Promise.race([document.fonts.ready, new Promise((r) => setTimeout(r, 5000))]));
 await page.waitForTimeout(700);
 
 const perStep = [];
