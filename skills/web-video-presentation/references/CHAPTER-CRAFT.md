@@ -21,6 +21,7 @@
 | 章节转场卡 | `<ChapterCard no={3} total={9} title="判断的落差" sub="一句预告" variant="anchor"/>` 作章首 step 0 | 章多（≥6 章）时用，营造课程感；与 host 时刻不同屏；**anchor 变体** = 章题外"设计工具选中框"描边生长+四角锚点弹入（博主片签名动作，优先用）；**谢幕**：step 1 再渲染一次并加 `exit`，卡片消散退场而非瞬间消失 |
 | 扫光高亮 | `<Shine word="收藏率">关键短语</Shine>` | 每屏 ≤1 处；用在结论句关键词，不给普通正文；word 触发同 Counter |
 | 大数字重锤 | `<Slam word="四百万"><Counter to={400} suffix="万"/></Slam>` | 每屏 ≤1 处；只给最有冲击力的那个数字；word 触发：砸入踩在报数那一拍 |
+| 发光流程图 | `<FlowDiagram word="链路" nodes={[{id:"a",label:"用户请求",icon:"👤",x:50,y:14},{id:"b",label:"识别",icon:"🧠",tone:"accent",x:50,y:52},{id:"c",label:"无法执行",icon:"⚙",tone:"fail",x:50,y:88}]} edges={[{from:"a",to:"b"},{from:"b",to:"c",tone:"fail",label:"噪声"}]} />` | **流程/链路/因果/架构类内容优先用它**（不要退化成卡片阵）；每屏 ≤1 个、节点 3-7；发光描边+虚线流动+红色失败路径；word 触发逐节点生长踩口播（2026-07-23 竞品对标：黑底发光图解是对标账号最高频套路） |
 | 媒体容器 | `<MediaFrame src="/media/shot.png" label="来源名" tilt={-4} />`（也可包 children 自绘 UI） | **截图/屏录永不裸放**（lint 记账）：描边浮卡+角标+暗角+框内 Ken Burns 持续运动；tilt 3D 倾角**相邻实例交替 ±3~6°**（全片同角度=AI 味）；motion：push 缓推（默认）/drift 横漂/none（仅动图内容） |
 | 甩切 | registry 里给 cue 加 `enter:"whip"`（与 effect 正交，如 `{effect:"host-full", enter:"whip"}`） | ~190ms 径向冲击帧，**只用在"人↔素材"情绪升档边界**（典型：章首数字人时刻/章节卡所在步）；**每章 ≤1**（校验强制）；句级平铺直叙一律硬切 |
 | 场景提亮 | step 根容器加 `className="scene-lift"` | 整场暗→亮 0.5s，配合元素错峰入场；**章首/重场景步专用**，不要每步都用（用滥变呼吸灯） |

@@ -55,6 +55,7 @@ SQLite（`data.db`）：`articles` / `jobs` / `job_events` / `feedback` / `douyi
 
 ## 修改纪律
 
+- **动规范面前先打存档点**：`node scripts/skill-checkpoint.mjs <备注>`（规范面 = `skills/` + 质量线规则文件）；验证通过后再打一个。整体回滚：`node scripts/skill-rollback.mjs <tag>`（无参数列出存档点；回滚=新提交不改历史，回滚后重启服务）
 - 变更流水线/模块边界 → 同步更新本文件的代码地图与阶段图
 - 变更端口、启动命令、依赖服务 → 同步更新 `OPERATIONS.md`
 - 长期决策与验证事实 → 写入 `PROJECT-MEMORY.md`
