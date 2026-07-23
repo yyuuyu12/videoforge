@@ -46,6 +46,16 @@ export function CameraLayer({ chapterId, step, children }: Props) {
 
     const cue = CAMERA_CUES[chapterId]?.[step] ?? null;
 
+    // 入步先平滑释放上一步残留变换（2026-07-23 用户实测根治"突然缩小"瞬断：
+    // 上一步的推近会在新画面上残留 ~550ms（测量延迟窗），随后被测量流程用
+    // transition:none 无过渡清零 = 肉眼可见的抖动）。改为进入新步的第一帧
+    // 就用短过渡把镜头拉回 1.0，新 cue 的推近随后按 0.9s 正常节奏进场——
+    // 只消除瞬断，倍率/频次/节奏零削减。
+    if (layer.style.transform && layer.style.transform !== "none") {
+      layer.style.transition = "transform 0.24s cubic-bezier(0.3, 0.7, 0.4, 1)";
+      layer.style.transform = "none";
+    }
+
     // 甩切（效果 v2b）：进入本步时一帧径向冲击（scale+blur 速降），模拟
     // 博主片"人↔素材"边界的运动模糊甩切。一次性 WAAPI 动画，与镜头
     // transform / 呼吸层互不干扰；句级平铺直叙不要用（cameraCheck 限每章 1 个）。
@@ -82,7 +92,8 @@ export function CameraLayer({ chapterId, step, children }: Props) {
         return;
       }
       // 在"无变换"状态下测量，得到稳定的本地坐标（screen px / scale0 = 本地 px）
-      const prevTransition = layer.style.transition;
+      // 测量后恢复为空串=回到样式表的 0.9s 过渡（不能回存测量前的内联值：
+      // 入步释放用的 0.24s 短过渡若被回存，新 cue 的推近会快得发晕）
       layer.style.transition = "none";
       layer.style.transform = "none";
       void layer.offsetWidth; // 强制回流，让测量基于复位后的布局
@@ -111,7 +122,7 @@ export function CameraLayer({ chapterId, step, children }: Props) {
         spot.style.setProperty("--spot-y", `${(cy / H) * 100}%`);
         spot.style.setProperty("--spot-rx", `${rx}px`);
         spot.style.setProperty("--spot-ry", `${ry}px`);
-        layer.style.transition = prevTransition;
+        layer.style.transition = "";
         spot.style.opacity = "1";
         return;
       }
@@ -151,7 +162,7 @@ export function CameraLayer({ chapterId, step, children }: Props) {
       let zoom = Math.min(clampZoom(cue), Math.max(1.05, targetMaxZoom));
       // 边缘钳制可能仍让目标贴边溢出（目标离画面边界很近时）：小步降档到贴合
       while (zoom > 1.05 && !targetFits(zoom)) zoom = Math.round((zoom - 0.1) * 100) / 100;
-      layer.style.transition = prevTransition;
+      layer.style.transition = "";
       const { fx: tx, fy: ty } = frameFor(zoom);
       layer.style.transform = `translate(${tx.toFixed(1)}px, ${ty.toFixed(1)}px) scale(${zoom})`;
       if (cue.effect === "magnify") {
