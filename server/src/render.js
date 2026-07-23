@@ -5,7 +5,7 @@ import { chromium } from "playwright-core";
 import { logEvent } from "./db.js";
 import { preparePreview } from "./preview.js";
 import { config } from "./config.js";
-import { sfxFilterChains, sfxPlacements, sfxSummary } from "./sfxMix.js";
+import { bgmAssetPath, bgmFilterChain, sfxFilterChains, sfxPlacements, sfxSummary } from "./sfxMix.js";
 
 /**
  * 服务端一键成片：无头 Chromium 以 ?auto=1 真实播放整片，
@@ -679,7 +679,20 @@ export async function renderJob(job) {
       if (sfxLabels.length) logEvent(job.id, "render", `音效混入 ${sfxLabels.length} 处（${sfxNote}）`);
     }
     const mixInputs = placements.map((_, i) => `[a${i}]`).join("") + sfxLabels.join("");
-    chains.push(`${mixInputs}amix=inputs=${placements.length + sfxLabels.length}:normalize=0:duration=longest,apad[mix]`);
+    // BGM 底乐层（2026-07-23 竞品频谱实证）：先混出人声轨，BGM 无限循环
+    // 经人声 sidechain ducking 后再与人声合流——人声一响垫乐让位、句间浮回。
+    const bgmAsset = config.bgm?.enabled !== false ? bgmAssetPath(config.bgm?.track || "ambient-dark") : null;
+    if (bgmAsset) {
+      chains.push(`${mixInputs}amix=inputs=${placements.length + sfxLabels.length}:normalize=0:duration=longest[voice]`);
+      const bgmInputIndex = 1 + placements.length + sfxLabels.length;
+      const bgm = bgmFilterChain({ inputIndex: bgmInputIndex, voiceLabel: "[voice]", volume: config.bgm?.volume ?? 0.16 });
+      args.push(...bgm.args, "-i", bgmAsset);
+      chains.push(...bgm.chains);
+      chains.push(`${bgm.voiceOutLabel}${bgm.outLabel}amix=inputs=2:normalize=0:duration=first,apad[mix]`);
+      logEvent(job.id, "render", `BGM 底乐铺底（${config.bgm?.track || "ambient-dark"}，人声 ducking 生效）`);
+    } else {
+      chains.push(`${mixInputs}amix=inputs=${placements.length + sfxLabels.length}:normalize=0:duration=longest,apad[mix]`);
+    }
     const output = join(job.workspace, "output.mp4");
     const mux = await run("ffmpeg", [...args, "-filter_complex", chains.join(";"),
       // Presentation frames already contain the time-synchronized AvatarPresenter.

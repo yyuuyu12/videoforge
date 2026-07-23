@@ -90,6 +90,10 @@ const DEFAULTS = {
   // P0-A 音效层（多助理路线首件）：成片混音时把效果件真实触发时刻叠 SFX。
   // 音量在 sfxMix.js 的 SFX_LIBRARY 按类型定；false 一键关掉整层。
   sfx: { enabled: true },
+  // BGM 底乐层（2026-07-23 竞品频谱实证）：循环垫乐 + 人声 sidechain ducking。
+  // track 对应 server/assets/bgm/<track>.wav|mp3（放新文件即换曲）；volume 为
+  // 相对人声的线性音量；false 一键关掉。
+  bgm: { enabled: true, track: "ambient-dark", volume: 0.16 },
 };
 
 function deepMerge(base, extra) {

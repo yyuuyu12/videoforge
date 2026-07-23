@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { sfxPlacements, sfxFilterChains, sfxSummary, sfxAssetPath, SFX_LIBRARY } from "./sfxMix.js";
+import { sfxPlacements, sfxFilterChains, sfxSummary, sfxAssetPath, SFX_LIBRARY, bgmFilterChain, bgmAssetPath } from "./sfxMix.js";
 
 test("sfxPlacements：换算/排序/过滤未知类型与负偏移", () => {
   const t0 = 1000;
@@ -46,4 +46,19 @@ test("sfx 资产存在且账目行可读", () => {
     assert.ok(sfxAssetPath(type), `缺少音效资产：${type}`);
   }
   assert.equal(sfxSummary([{ type: "whip" }, { type: "whip" }, { type: "slam" }]), "whip×2 slam×1");
+});
+
+test("bgmFilterChain：ducking 链形状与标签", () => {
+  const { args, chains, outLabel, voiceOutLabel } = bgmFilterChain({ inputIndex: 7, voiceLabel: "[voice]", volume: 0.2 });
+  assert.deepEqual(args, ["-stream_loop", "-1"]);
+  assert.match(chains[0], /^\[7:a\]volume=0\.2\[bgmraw\]$/);
+  assert.match(chains[1], /^\[voice\]asplit=2\[voice_out\]\[voice_sc\]$/);
+  assert.match(chains[2], /sidechaincompress.*\[bgmduck\]$/);
+  assert.equal(outLabel, "[bgmduck]");
+  assert.equal(voiceOutLabel, "[voice_out]");
+});
+
+test("bgm 保底资产存在", () => {
+  assert.ok(bgmAssetPath("ambient-dark"), "缺少 server/assets/bgm/ambient-dark.wav（node scripts/gen-bgm.mjs 生成）");
+  assert.equal(bgmAssetPath("不存在的曲子"), null);
 });

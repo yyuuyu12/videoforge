@@ -69,3 +69,34 @@ export function sfxSummary(placements) {
   for (const p of placements) counts[p.type] = (counts[p.type] || 0) + 1;
   return Object.entries(counts).map(([k, v]) => `${k}×${v}`).join(" ") || "无";
 }
+
+/**
+ * BGM 底乐层（2026-07-23 竞品频谱实证：对标账号全程底乐铺满语音间隙，
+ * 我们的成片段间纯静默）。机制：BGM 无限循环铺满全片 + 人声 sidechain
+ * ducking——人声出现时垫乐自动压低，间隙时浮回来。
+ * 曲库 server/assets/bgm/<track>.wav|mp3：合成氛围垫为保底，放同目录
+ * 新文件并改 config.bgm.track 即换正经曲子。
+ */
+export function bgmAssetPath(track) {
+  for (const ext of ["wav", "mp3", "m4a"]) {
+    const p = join(ROOT, "server", "assets", "bgm", `${track}.${ext}`);
+    if (existsSync(p)) return p;
+  }
+  return null;
+}
+
+/**
+ * 生成 BGM 的 ffmpeg 输入参数与 filter 链。
+ * - voiceLabel：已混好的人声轨标签（如 "[voice]"）
+ * - 返回 outLabel = duck 后的 BGM 轨标签；调用方把两轨再 amix。
+ * sidechaincompress：threshold 低、ratio 高、release 长——人声一响垫乐即让位，
+ * 句间自然浮回，竞品听感的关键。level_sc 提升侦测灵敏度。
+ */
+export function bgmFilterChain({ inputIndex, voiceLabel, volume = 0.16 }) {
+  const chains = [
+    `[${inputIndex}:a]volume=${volume}[bgmraw]`,
+    `${voiceLabel}asplit=2[voice_out][voice_sc]`,
+    `[bgmraw][voice_sc]sidechaincompress=threshold=0.02:ratio=12:attack=60:release=800:level_sc=4[bgmduck]`,
+  ];
+  return { args: ["-stream_loop", "-1"], chains, outLabel: "[bgmduck]", voiceOutLabel: "[voice_out]" };
+}
