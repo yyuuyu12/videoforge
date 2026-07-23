@@ -974,6 +974,7 @@ export async function repairChapterQuality(job, audit) {
     "字幕必须与对应 narration/音频 step 一一对应，每次只显示一行短句，中文目标 8 字、硬上限 10 字，下一句出现时上一句消失。",
     "字幕安全带和数字人安全区内不得放正文、图表、关键数字或高对比装饰。任何非设计性重叠都必须消除。",
     "如果拆分或合并 step，必须同步维护组件条件、narrations.ts、chapters.ts 和 useStepper STORAGE_KEY；不得只改字幕或只改声音造成音画错位。",
+    "工作台模板文件（src/components/**、src/hooks/**、App.tsx、main.tsx、styles/**）绝对禁止改动——系统会自动还原并浪费你一轮；cameraCues.ts 是机器生成的自含文件，禁止添加 import。",
     "完成后运行 npx tsc --noEmit。不要向用户提问，修完即退出。",
   ].join("\n");
   return runAgent({

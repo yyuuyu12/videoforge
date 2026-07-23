@@ -141,9 +141,46 @@ async function performBuild(job, fingerprint) {
 // 同一指纹失败过就直接复抛缓存错误，等代码真正变更（指纹变化）再重试构建。
 const failedBuilds = new Map();
 
+/** 工作台模板契约文件自愈（2026-07-23 job-38 实证：修复 agent 把 useStepper.ts
+ * 改出语法错、往 cameraCues 加 import——生成/修复模型偶发越界改模板文件，
+ * 反复构建失败观感=卡死）。每次构建前把 hooks/components/styles/App/main
+ * 与模板快照对齐：被改动即还原、模板新增文件补齐（保持组件集自洽）。
+ * Subtitle.css 例外（流水线按字幕预设改写）；旧脚手架（无 avatar-mount:v1
+ * 契约）不管——历史作品接口不同，强推会砸坏定制。 */
+function restoreProtectedTemplateFiles(job, presDir) {
+  const appPath = join(presDir, "src", "App.tsx");
+  if (!existsSync(appPath)) return;
+  try {
+    if (!readFileSync(appPath, "utf8").includes("avatar-mount:v1")) return;
+  } catch { return; }
+  const templateSrc = join(config.skills.webVideoPresentation, "templates", "src");
+  const SKIP = new Set(["components/Subtitle.css"]);
+  let restored = 0;
+  const walk = (rel) => {
+    const src = join(templateSrc, rel);
+    if (!existsSync(src)) return;
+    if (statSync(src).isDirectory()) {
+      for (const name of readdirSync(src)) walk(`${rel}/${name}`);
+      return;
+    }
+    if (SKIP.has(rel)) return;
+    const dst = join(presDir, "src", rel);
+    const content = readFileSync(src, "utf8");
+    try {
+      if (existsSync(dst) && readFileSync(dst, "utf8") === content) return;
+    } catch {}
+    mkdirSync(dirname(dst), { recursive: true });
+    writeFileSync(dst, content);
+    restored += 1;
+  };
+  for (const root of ["hooks", "components", "styles", "App.tsx", "main.tsx"]) walk(root);
+  if (restored) logEvent(job.id, "preview_build", `已还原/补齐工作台模板契约文件 ${restored} 个（模板文件禁止生成与修复模型改写）`, "warning");
+}
+
 export async function buildPresentation(job) {
   const presDir = join(job.workspace, "presentation");
   if (!existsSync(join(presDir, "package.json"))) throw new Error("画面工程尚未生成");
+  restoreProtectedTemplateFiles(job, presDir);
   const fingerprint = presentationFingerprint(presDir);
   const failed = failedBuilds.get(job.id);
   if (failed && failed.fingerprint === fingerprint) throw new Error(failed.message);

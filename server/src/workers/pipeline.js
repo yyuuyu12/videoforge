@@ -92,7 +92,7 @@ async function advance(jobId) {
         // failed 耗尽调用内重试后阶段判 failed 等人工点重试，观感=莫名卡死）。
         // 每阶段最多自动重排 2 次、45s 退避；等待期保持 running，服务重启时
         // 恢复逻辑会照常回队列，不丢任务。非网络类错误照旧人工介入。
-        const transient = /fetch failed|HTTP 5\d\d|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|上游返回非 JSON/i.test(note);
+        const transient = /fetch failed|HTTP 5\d\d|ECONNRESET|ECONNREFUSED|ETIMEDOUT|socket hang up|上游返回非 JSON|连续返回空响应|返回空响应/i.test(note);
         if (transient) {
           let meta = {};
           try { meta = JSON.parse(getJob(jobId).meta || "{}"); } catch {}
@@ -176,7 +176,7 @@ async function advance(jobId) {
               writeQualityProgress(ws, { phase: "camera", round: attempt, maxRound: 2, roundStartedAt: new Date().toISOString() });
               recordQualityEntry({ kind: "camera-check", jobId, phase: `repair-${attempt}`, errors: camera.errors, defects: { "camera-violation": camera.errors } });
               logEvent(jobId, "quality", `镜头声明 ${camera.errors} 处违规，自动第 ${attempt}/2 次回喂修复`, "warning");
-              const fixed = await repairFromEvidence(getJob(jobId), { title: "镜头声明违规", evidence: cameraEvidence(camera, 8), rule: "只用词表内 effect；focus/pan/spotlight 必带真实 target；zoom∈[1.1,3.0]、focus≥1.4；每章内容镜头≤密度预算；whip 每章≤1" });
+              const fixed = await repairFromEvidence(getJob(jobId), { title: "镜头声明违规", evidence: cameraEvidence(camera, 8), rule: "只用词表内 effect；focus/pan/spotlight 必带真实 target；zoom∈[1.1,3.0]、focus≥1.4；每章内容镜头≤密度预算；whip 每章≤1；cameraCues.ts 是机器生成的自含文件——禁止添加 import，只允许调整数组内的 cue 对象" });
               if (!fixed.ok) break;
               await buildPresentation(getJob(jobId));
               camera = validateCameraCues(presDir(), { density: cameraDensity });
