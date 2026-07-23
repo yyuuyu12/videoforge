@@ -374,6 +374,7 @@ export const api = {
       body: JSON.stringify({ stage }),
     }),
   cancel: (id: number) => req(`/jobs/${id}/cancel`, { method: "POST" }),
+  skipEffectScore: (id: number) => req(`/jobs/${id}/effect-score/skip`, { method: "POST" }),
   startRender: (id: number) =>
     req<{ ok: boolean; started: boolean }>(`/jobs/${id}/render`, {
       method: "POST",

@@ -8,7 +8,7 @@ import { defectSummary, recordQualityEntry } from "../qualityLedger.js";
 import { lintChapters, lintDefectSummary, lintEvidence } from "../chapterLint.js";
 import { cameraEvidence, validateCameraCues } from "../cameraCheck.js";
 import { choreographCameras } from "../cameraChoreographer.js";
-import { runEffectScore } from "../effectScoreRunner.js";
+import { runEffectScore } from "../effectScoreRunner.js"; // skipEffectScore 由 routes 直接调 runner
 import { config } from "../config.js";
 import { preflightWarnings } from "../preflight.js";
 import { clearCancel, isCancelling, requestCancel, throwIfCancelled } from "../cancellation.js";
@@ -217,12 +217,33 @@ async function advance(jobId) {
           // 效果打分（博主质感维）：结构分只管"不出错"，本器管"够不够博主水准"
           // （fx密度/强效果占比/平淡游程/切字）。默认只记账校准；config.effectScore.gate
           // 开启且低于 minScore 时，触发一次效果向自动修复。
-          if (config.effectScore?.enabled) {
+          const readSkipFlag = () => {
+            try { return Boolean(JSON.parse(getJob(jobId).meta || "{}").skipEffectScore); } catch { return false; }
+          };
+          const clearSkipFlag = () => {
+            try {
+              const m = JSON.parse(getJob(jobId).meta || "{}");
+              delete m.skipEffectScore;
+              updateJob(jobId, { meta: JSON.stringify(m) });
+            } catch {}
+          };
+          if (config.effectScore?.enabled && readSkipFlag()) {
+            clearSkipFlag();
+            logEvent(jobId, "quality", "效果打分：用户选择跳过（本轮不打分、不拦门禁）", "warning");
+          } else if (config.effectScore?.enabled) {
             try {
               throwIfCancelled(jobId);
               writeQualityProgress(ws, { phase: "effect", round: 0, maxRound: 1, score: null, targetScore: (config.effectScore.minScore ?? 72), chapter: null, step: null, roundStartedAt: new Date().toISOString() });
-              genProgress(98, "效果打分：博主质感维（后处理 5/5）");
-              const es = await runEffectScore(jobId, { port: config.port });
+              genProgress(98, "效果打分：博主质感维（后处理 5/5，可跳过）");
+              const es = await runEffectScore(jobId, {
+                port: config.port,
+                onProgress: (done, totalSteps) => genProgress(98, `效果打分 ${done}/${totalSteps} 屏（后处理 5/5，可跳过）`),
+              });
+              if (readSkipFlag()) {
+                clearSkipFlag();
+                logEvent(jobId, "quality", "效果打分：用户中途跳过，结果不作数、直接进入验收", "warning");
+                throw { __skipped: true };
+              }
               if (!es.ok) {
                 logEvent(jobId, "quality", `效果打分未能运行：${es.note}`, "warning");
               } else {
@@ -252,11 +273,13 @@ async function advance(jobId) {
                 }
               }
             } catch (esError) {
+              if (esError && esError.__skipped) { /* 用户跳过：正常放行进验收 */ } else {
               // 门禁失败必须穿透（与 lint 的 /处违规/ 同款）；只有打分器自身
               // 故障（起不来/超时）才降级为警告，不因测量工具挂了冤枉作品。
               if (esError?.cancelled) throw esError; // 取消同样必须穿透
               if (/低于门禁/.test(esError.message)) throw esError;
               logEvent(jobId, "quality", `效果打分异常：${esError.message}`, "warning");
+              }
             }
           }
           writeQualityProgress(ws, { phase: "done" });

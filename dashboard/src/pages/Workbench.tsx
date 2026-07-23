@@ -1471,6 +1471,17 @@ export function Workbench({
             </span>
           </div>
           <em>{job.status === "queued" ? "等待开始" : "进行中"}</em>
+          {/* 效果打分期专属：用户目检已通过时可跳过（一次性，不拦门禁直接进验收） */}
+          {activeProgressText.includes("效果打分") && (
+            <button
+              type="button"
+              onClick={() => { void api.skipEffectScore(job.id).then(() => load()); }}
+              disabled={busy}
+              title="跳过本轮效果打分，直接进入人工验收（不影响其他检查）"
+            >
+              跳过打分
+            </button>
+          )}
           <button type="button" onClick={() => void cancelGeneration()} disabled={busy}>
             {busy ? "正在取消..." : "取消生成"}
           </button>

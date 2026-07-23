@@ -1291,6 +1291,19 @@ api.post("/jobs/:id/devserver/stop", (req, res) => {
 
 const renderingJobs = new Set();
 
+// 效果打分跳过（2026-07-23 用户需求：后处理 5/5 耗时且用户已目检通过）：
+// 置一次性 meta 标志 + 立即终止在跑的打分子进程；pipeline 见标志直接放行。
+api.post("/jobs/:id/effect-score/skip", (req, res) => {
+  const job = getJob(Number(req.params.id));
+  if (!job) return res.status(404).json({ error: "not found" });
+  let meta = {};
+  try { meta = JSON.parse(job.meta || "{}"); } catch {}
+  updateJob(job.id, { meta: JSON.stringify({ ...meta, skipEffectScore: true }) });
+  const killed = skipEffectScore(job.id);
+  logEvent(job.id, "quality", `用户请求跳过效果打分${killed ? "（已终止在跑的打分器）" : ""}`, "warning");
+  res.json({ ok: true, killed });
+});
+
 api.post("/jobs/:id/choreograph", async (req, res) => {
   const job = getJob(Number(req.params.id));
   if (!job) return res.status(404).json({ error: "not found" });

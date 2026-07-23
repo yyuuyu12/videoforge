@@ -52,6 +52,7 @@ await page.waitForTimeout(700);
 
 const perStep = [];
 for (let g = 0; g < total; g++) {
+  if (g % 5 === 0 || g === total - 1) console.error(`PROGRESS ${g + 1}/${total}`);
   await page.waitForTimeout(1250); // 等测量(550)+过渡(900) 落定
   const cue = flat[g].cue;
   const m = await page.evaluate((sel) => {
