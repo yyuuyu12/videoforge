@@ -94,6 +94,10 @@ const DEFAULTS = {
   // track 对应 server/assets/bgm/<track>.wav|mp3（放新文件即换曲）；volume 为
   // 相对人声的线性音量；false 一键关掉。
   bgm: { enabled: true, track: "ambient-dark", volume: 0.16 },
+  // 导出分辨率（2026-07-23 用户拍板"太模糊"）："1080p" | "2k" | "4k"。
+  // 2k/4k 走 2 倍设备像素采帧（物理 4K 源）再按档位编码；4K 采帧/编码
+  // 耗时与临时盘占用约为 1080p 的 3-4 倍。
+  render: { resolution: "2k" },
 };
 
 function deepMerge(base, extra) {

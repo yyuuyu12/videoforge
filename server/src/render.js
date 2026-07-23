@@ -18,6 +18,14 @@ import { bgmAssetPath, bgmFilterChain, sfxFilterChains, sfxPlacements, sfxSummar
 // 逐屏审计及格线（2026-07-23 用户拍板：90 偏苛，88 起放行）
 export const PASS_SCORE = 88;
 
+/** 导出分辨率档位 → 采帧 DSF 与输出尺寸（页面 CSS 坐标恒为 1920×1080）。 */
+function renderDims() {
+  const preset = String(config.render?.resolution || "2k").toLowerCase();
+  if (preset === "4k") return { dsf: 2, w: 3840, h: 2160, label: "4K" };
+  if (preset === "1080p") return { dsf: 1, w: 1920, h: 1080, label: "1080p" };
+  return { dsf: 2, w: 2560, h: 1440, label: "2K" };
+}
+
 function progress(jobId, pct, message) {
   logEvent(jobId, "render", `progress|${Math.max(0, Math.min(100, Math.round(pct)))}|${message}`);
 }
@@ -543,7 +551,9 @@ export async function renderJob(job) {
   mkdirSync(framesDir, { recursive: true });
 
   try {
-    const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+    const dims = renderDims();
+    logEvent(job.id, "render", `导出分辨率 ${dims.w}×${dims.h}（${dims.label}，采帧 DSF×${dims.dsf}）`);
+    const context = await browser.newContext({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: dims.dsf });
     // 拦截每个 <audio> 的真实播放时刻（playing = 声音真正开始，而不是 play() 调用）。
     await context.addInitScript(() => {
       window.__vfAudio = [];
@@ -575,7 +585,7 @@ export async function renderJob(job) {
       frames.push({ file, ts: params.metadata.timestamp });
       cdp.send("Page.screencastFrameAck", { sessionId: params.sessionId }).catch(() => {});
     });
-    await cdp.send("Page.startScreencast", { format: "jpeg", quality: 95, maxWidth: 1920, maxHeight: 1080, everyNthFrame: 1 });
+    await cdp.send("Page.startScreencast", { format: "jpeg", quality: 95, maxWidth: dims.w, maxHeight: dims.h, everyNthFrame: 1 });
 
     progress(job.id, 18, "开始整片自动播放");
     // 不用 Space 启动：未打 suppressSpace 补丁的 scaffold 里 useStepper 也监听
@@ -660,7 +670,7 @@ export async function renderJob(job) {
 
     const videoOnly = join(tmpDir, "video-only.mp4");
     const enc = await run("ffmpeg", ["-y", "-f", "concat", "-safe", "0", "-i", listFile,
-      "-vf", "fps=30,scale=1920:1080:force_original_aspect_ratio=decrease,pad=1920:1080:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p",
+      "-vf", `fps=30,scale=${dims.w}:${dims.h}:force_original_aspect_ratio=decrease,pad=${dims.w}:${dims.h}:(ow-iw)/2:(oh-ih)/2:color=black,format=yuv420p`,
       "-c:v", "libx264", "-preset", "medium", "-crf", "18", videoOnly], tmpDir);
     if (!enc.ok) throw new Error(`视频编码失败：${enc.output.slice(-400)}`);
 
